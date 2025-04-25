@@ -137,3 +137,7 @@ dist
 
 # macOS specific files
 **/.DS_Store
+
+# Sublime Text project files
+*.sublime-project
+*.sublime-workspace
