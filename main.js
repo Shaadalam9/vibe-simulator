@@ -318,17 +318,44 @@ function createRoadSegment(x, z) {
     return segment;
 }
 
-// Create building with more detail
-function createBuilding() {
+// Create building with more detail and variety
+function createBuilding(type = null) {
     const building = new THREE.Group();
-    
-    const height = Math.random() * 30 + 20;
-    const width = Math.random() * 10 + 15;
-    const depth = Math.random() * 10 + 15;
-
-    // Main structure with better materials
+    if (!type) {
+        const types = ['modern', 'classic', 'skyscraper', 'house'];
+        type = types[Math.floor(Math.random() * types.length)];
+    }
+    let height, width, depth, color;
+    switch(type) {
+        case 'skyscraper':
+            height = Math.random() * 60 + 60;
+            width = Math.random() * 10 + 15;
+            depth = Math.random() * 10 + 15;
+            color = 0xcccccc;
+            break;
+        case 'modern':
+            height = Math.random() * 30 + 20;
+            width = Math.random() * 15 + 20;
+            depth = Math.random() * 10 + 20;
+            color = 0x999999;
+            break;
+        case 'classic':
+            height = Math.random() * 20 + 10;
+            width = Math.random() * 15 + 20;
+            depth = Math.random() * 10 + 15;
+            color = 0xbfa77a;
+            break;
+        case 'house':
+        default:
+            height = Math.random() * 8 + 6;
+            width = Math.random() * 8 + 8;
+            depth = Math.random() * 8 + 8;
+            color = 0xd9c9a9;
+            break;
+    }
+    // Main structure
     const buildingMaterial = new THREE.MeshPhysicalMaterial({
-        color: Math.random() > 0.5 ? 0xcccccc : 0x999999,
+        color: color,
         roughness: 0.7,
         metalness: 0.2,
         clearcoat: 0.1
@@ -341,67 +368,162 @@ function createBuilding() {
     mainStructure.castShadow = true;
     mainStructure.receiveShadow = true;
     building.add(mainStructure);
-
-    // Windows with better glass effect
-    const windowMaterial = new THREE.MeshPhysicalMaterial({
-        color: 0x88ccff,
-        metalness: 0.9,
-        roughness: 0.1,
-        transparent: true,
-        opacity: 0.8,
-        clearcoat: 1.0
-    });
-
-    // Add windows on all sides
-    const sides = [
-        { axis: 'z', value: depth/2, rotation: 0 },
-        { axis: 'z', value: -depth/2, rotation: Math.PI },
-        { axis: 'x', value: width/2, rotation: Math.PI/2 },
-        { axis: 'x', value: -width/2, rotation: -Math.PI/2 }
-    ];
-
-    sides.forEach(side => {
-        for (let y = 2; y < height - 2; y += 3) {
-            for (let x = -width/2 + 2; x < width/2 - 2; x += 3) {
-                const window = new THREE.Mesh(
-                    new THREE.BoxGeometry(2, 2, 0.1),
-                    windowMaterial
-                );
-                if (side.axis === 'z') {
-                    window.position.set(x, y, side.value);
-                } else {
-                    window.position.set(side.value, y, x);
-                    window.rotation.y = side.rotation;
+    // Add windows for tall buildings
+    if (type !== 'house') {
+        const windowMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0x88ccff,
+            metalness: 0.9,
+            roughness: 0.1,
+            transparent: true,
+            opacity: 0.7,
+            clearcoat: 1.0
+        });
+        const sides = [
+            { axis: 'z', value: depth/2, rotation: 0 },
+            { axis: 'z', value: -depth/2, rotation: Math.PI },
+            { axis: 'x', value: width/2, rotation: Math.PI/2 },
+            { axis: 'x', value: -width/2, rotation: -Math.PI/2 }
+        ];
+        sides.forEach(side => {
+            for (let y = 2; y < height - 2; y += 3) {
+                for (let x = -width/2 + 2; x < width/2 - 2; x += 3) {
+                    const window = new THREE.Mesh(
+                        new THREE.BoxGeometry(2, 2, 0.1),
+                        windowMaterial
+                    );
+                    if (side.axis === 'z') {
+                        window.position.set(x, y, side.value);
+                    } else {
+                        window.position.set(side.value, y, x);
+                        window.rotation.y = side.rotation;
+                    }
+                    building.add(window);
                 }
-                building.add(window);
             }
-        }
-    });
-
+        });
+    } else {
+        // Add a roof for houses
+        const roof = new THREE.Mesh(
+            new THREE.ConeGeometry(width * 0.7, 3, 4),
+            new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
+        );
+        roof.position.y = height + 1.5;
+        roof.rotation.y = Math.PI / 4;
+        building.add(roof);
+    }
     return building;
 }
 
-// Create city chunk
+// Create street light
+function createStreetLight() {
+    const group = new THREE.Group();
+    const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.15, 0.2, 6, 8),
+        new THREE.MeshPhysicalMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.3 })
+    );
+    pole.position.y = 3;
+    group.add(pole);
+    const lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(0.4, 12, 12),
+        new THREE.MeshPhysicalMaterial({ color: 0xffffcc, emissive: 0xffffcc, emissiveIntensity: 0.7, transparent: true, opacity: 0.8 })
+    );
+    lamp.position.y = 6.1;
+    group.add(lamp);
+    return group;
+}
+
+// Create park (simple green area with trees)
+function createPark(size = 20) {
+    const group = new THREE.Group();
+    const park = new THREE.Mesh(
+        new THREE.BoxGeometry(size, 0.2, size),
+        new THREE.MeshPhongMaterial({ color: 0x4fa34f })
+    );
+    park.position.y = 0.1;
+    group.add(park);
+    // Add some trees
+    for (let i = 0; i < 8; i++) {
+        const tree = createTree();
+        tree.position.x = (Math.random() - 0.5) * (size - 4);
+        tree.position.z = (Math.random() - 0.5) * (size - 4);
+        group.add(tree);
+    }
+    return group;
+}
+
+// Create tree
+function createTree() {
+    const group = new THREE.Group();
+    const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.3, 0.4, 2, 8),
+        new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
+    );
+    trunk.position.y = 1;
+    group.add(trunk);
+    const leaves = new THREE.Mesh(
+        new THREE.SphereGeometry(1.2, 8, 8),
+        new THREE.MeshStandardMaterial({ color: 0x228b22 })
+    );
+    leaves.position.y = 2.5;
+    group.add(leaves);
+    return group;
+}
+
+// Update createCityChunk for grid layout, parks, street lights, sidewalks, crosswalks
 function createCityChunk(chunkX, chunkZ) {
     const chunk = new THREE.Group();
     const chunkKey = `${chunkX},${chunkZ}`;
-    
     if (loadedChunks.has(chunkKey)) return null;
     loadedChunks.add(chunkKey);
-
     // Add road
     const road = createRoadSegment(chunkX * CHUNK_SIZE, chunkZ * CHUNK_SIZE);
     chunk.add(road);
-
-    // Add buildings
-    for (let i = 0; i < 5; i++) {
-        const building = createBuilding();
-        const offset = (Math.random() - 0.5) * (CHUNK_SIZE - 40);
-        building.position.x = chunkX * CHUNK_SIZE + offset;
-        building.position.z = chunkZ * CHUNK_SIZE + (Math.random() > 0.5 ? 25 : -25);
-        chunk.add(building);
+    // Add sidewalks
+    const sidewalkMaterial = new THREE.MeshStandardMaterial({ color: 0xb0b0b0 });
+    [-16, 16].forEach(offset => {
+        const sidewalk = new THREE.Mesh(
+            new THREE.PlaneGeometry(CHUNK_SIZE, 4),
+            sidewalkMaterial
+        );
+        sidewalk.rotation.x = -Math.PI / 2;
+        sidewalk.position.set(chunkX * CHUNK_SIZE, 0.06, chunkZ * CHUNK_SIZE + offset);
+        chunk.add(sidewalk);
+    });
+    // Add crosswalks at intersections
+    if (chunkX % 2 === 0 && chunkZ % 2 === 0) {
+        for (let i = -8; i <= 8; i += 4) {
+            const crosswalk = new THREE.Mesh(
+                new THREE.PlaneGeometry(2, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0xffffff })
+            );
+            crosswalk.rotation.x = -Math.PI / 2;
+            crosswalk.position.set(chunkX * CHUNK_SIZE + i, 0.07, chunkZ * CHUNK_SIZE + 0);
+            chunk.add(crosswalk);
+        }
     }
-
+    // Add buildings and parks
+    for (let i = 0; i < 4; i++) {
+        if (Math.random() < 0.2) {
+            // Park
+            const park = createPark(18 + Math.random() * 8);
+            park.position.x = chunkX * CHUNK_SIZE + (Math.random() - 0.5) * (CHUNK_SIZE - 40);
+            park.position.z = chunkZ * CHUNK_SIZE + (Math.random() > 0.5 ? 25 : -25);
+            chunk.add(park);
+        } else {
+            // Building
+            const building = createBuilding();
+            building.position.x = chunkX * CHUNK_SIZE + (Math.random() - 0.5) * (CHUNK_SIZE - 40);
+            building.position.z = chunkZ * CHUNK_SIZE + (Math.random() > 0.5 ? 25 : -25);
+            chunk.add(building);
+        }
+    }
+    // Add street lights
+    for (let i = 0; i < 4; i++) {
+        const light = createStreetLight();
+        light.position.x = chunkX * CHUNK_SIZE + (i < 2 ? -CHUNK_SIZE/2 + 5 : CHUNK_SIZE/2 - 5);
+        light.position.z = chunkZ * CHUNK_SIZE + (i % 2 === 0 ? -10 : 10);
+        chunk.add(light);
+    }
     return chunk;
 }
 
@@ -529,7 +651,7 @@ function updateChunks() {
 
 // Animation loop
 function animate() {
-    requestAnimationFrame(animate);
+  requestAnimationFrame(animate);
 
     // Update speed
     if (keys['w']) {
@@ -569,7 +691,7 @@ function animate() {
     // Animate clouds
     clouds.animate();
 
-    renderer.render(scene, camera);
+  renderer.render(scene, camera);
 }
 
 // Handle window resizing
