@@ -10,8 +10,29 @@ export class CityLoader {
         this.scene.add(this.buildings);
         this.tiles = new THREE.Group();
         this.scene.add(this.tiles);
+        this.roads = new THREE.Group();
+        this.scene.add(this.roads);
+        
+        // Load textures
+        this.textureLoader = new THREE.TextureLoader();
+        this.loadTextures();
         
         console.log('CityLoader initialized with center:', { lat: centerLat, lon: centerLon });
+    }
+
+    async loadTextures() {
+        this.textures = {
+            building: await this.textureLoader.loadAsync('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/brick_diffuse.jpg'),
+            buildingNormal: await this.textureLoader.loadAsync('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/brick_bump.jpg'),
+            road: await this.textureLoader.loadAsync('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/terrain/grasslight-big.jpg'),
+            window: await this.textureLoader.loadAsync('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/hardwood2_diffuse.jpg')
+        };
+        
+        // Configure texture settings
+        Object.values(this.textures).forEach(texture => {
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(4, 4);
+        });
     }
 
     // Convert lat/lon to local coordinates
@@ -30,6 +51,8 @@ export class CityLoader {
             [out:json][timeout:25];
             (
                 way["building"](${minLat},${minLon},${maxLat},${maxLon});
+                way["highway"](${minLat},${minLon},${maxLat},${maxLon});
+                way["landuse"](${minLat},${minLon},${maxLat},${maxLon});
                 relation["building"](${minLat},${minLon},${maxLat},${maxLon});
             );
             out body;
@@ -54,7 +77,10 @@ export class CityLoader {
             const geojsonData = osmToGeoJSON(osmData);
             console.log('GeoJSON data converted:', geojsonData);
             
-            await this.processBuildings(geojsonData);
+            await Promise.all([
+                this.processBuildings(geojsonData),
+                this.processRoads(geojsonData)
+            ]);
         } catch (error) {
             console.error('Error loading OSM data:', error);
             throw error;
@@ -66,7 +92,7 @@ export class CityLoader {
         const promises = geojsonData.features.map(async feature => {
             if (feature.geometry.type === 'Polygon' && feature.properties.building) {
                 const height = this.getBuildingHeight(feature.properties);
-                const building = await this.createBuilding(feature.geometry.coordinates[0], height);
+                const building = await this.createBuilding(feature.geometry.coordinates[0], height, feature.properties);
                 if (building) {
                     this.buildings.add(building);
                 }
@@ -77,15 +103,22 @@ export class CityLoader {
     }
 
     getBuildingHeight(properties) {
+        // Try to get real height data
         if (properties.height) {
             return parseFloat(properties.height);
         } else if (properties.levels) {
             return parseFloat(properties.levels) * 3;
+        } else if (properties.building === 'residential') {
+            return Math.random() * 5 + 8; // 8-13 meters for residential
+        } else if (properties.building === 'commercial') {
+            return Math.random() * 10 + 15; // 15-25 meters for commercial
+        } else if (properties.building === 'industrial') {
+            return Math.random() * 5 + 6; // 6-11 meters for industrial
         }
-        return Math.random() * 10 + 5;
+        return Math.random() * 10 + 5; // Default height
     }
 
-    async createBuilding(coordinates, height) {
+    async createBuilding(coordinates, height, properties) {
         try {
             const shape = new THREE.Shape();
             
@@ -98,27 +131,99 @@ export class CityLoader {
                 }
             });
 
+            // Create building geometry with more detail
             const extrudeSettings = {
                 depth: height,
-                bevelEnabled: false
+                bevelEnabled: true,
+                bevelThickness: 0.2,
+                bevelSize: 0.1,
+                bevelSegments: 3
             };
 
             const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-            const material = new THREE.MeshPhongMaterial({
-                color: 0xcccccc,
-                flatShading: true,
-                side: THREE.DoubleSide
+            
+            // Create more realistic building material
+            const material = new THREE.MeshPhysicalMaterial({
+                map: this.textures.building,
+                normalMap: this.textures.buildingNormal,
+                normalScale: new THREE.Vector2(0.5, 0.5),
+                roughness: 0.7,
+                metalness: 0.2,
+                clearcoat: 0.1,
+                clearcoatRoughness: 0.2
             });
 
             const building = new THREE.Mesh(geometry, material);
             building.castShadow = true;
             building.receiveShadow = true;
+
+            // Add windows
+            this.addWindows(building, height, properties);
             
             return building;
         } catch (error) {
             console.error('Error creating building:', error);
             return null;
         }
+    }
+
+    addWindows(building, height, properties) {
+        const windowGeometry = new THREE.PlaneGeometry(1, 1.5);
+        const windowMaterial = new THREE.MeshPhysicalMaterial({
+            map: this.textures.window,
+            transparent: true,
+            opacity: 0.7,
+            metalness: 0.9,
+            roughness: 0.1,
+            clearcoat: 1.0
+        });
+
+        // Add windows to each side of the building
+        const sides = building.geometry.attributes.position;
+        const windowCount = Math.floor(height / 3); // One window per 3 meters
+
+        for (let i = 0; i < windowCount; i++) {
+            const window = new THREE.Mesh(windowGeometry, windowMaterial);
+            window.position.y = i * 3 + 1.5;
+            window.rotation.y = Math.random() * Math.PI * 2;
+            window.position.x = (Math.random() - 0.5) * 5;
+            window.position.z = (Math.random() - 0.5) * 5;
+            building.add(window);
+        }
+    }
+
+    async processRoads(geojsonData) {
+        const roadFeatures = geojsonData.features.filter(f => 
+            f.properties.highway && ['primary', 'secondary', 'residential'].includes(f.properties.highway)
+        );
+
+        roadFeatures.forEach(feature => {
+            if (feature.geometry.type === 'LineString') {
+                const road = this.createRoad(feature.geometry.coordinates, feature.properties);
+                if (road) this.roads.add(road);
+            }
+        });
+    }
+
+    createRoad(coordinates, properties) {
+        const points = coordinates.map(coord => {
+            const [x, y] = this.latLonToXY(coord[1], coord[0]);
+            return new THREE.Vector3(x, 0.1, y);
+        });
+
+        const roadWidth = properties.highway === 'primary' ? 8 : 
+                         properties.highway === 'secondary' ? 6 : 4;
+
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.MeshStandardMaterial({
+            map: this.textures.road,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+
+        const road = new THREE.Mesh(geometry, material);
+        road.computeVertexNormals();
+        return road;
     }
 
     async loadMapTiles(bounds) {
