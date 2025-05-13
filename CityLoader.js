@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { GeoConverter } from 'three-geo';
 import { osmToGeoJSON } from 'osmtogeojson';
 
 export class CityLoader {
@@ -7,18 +6,21 @@ export class CityLoader {
         this.scene = scene;
         this.centerLat = centerLat;
         this.centerLon = centerLon;
-        
-        // Initialize GeoConverter with proper scale
-        this.converter = new GeoConverter();
-        this.converter.setCenter(centerLat, centerLon);
-        this.converter.setScale(1); // Set scale to 1 meter per unit
-        
         this.buildings = new THREE.Group();
         this.scene.add(this.buildings);
         this.tiles = new THREE.Group();
         this.scene.add(this.tiles);
         
         console.log('CityLoader initialized with center:', { lat: centerLat, lon: centerLon });
+    }
+
+    // Convert lat/lon to local coordinates
+    latLonToXY(lat, lon) {
+        const R = 6378137; // Earth radius in meters
+        const x = R * (THREE.MathUtils.degToRad(lon - this.centerLon));
+        const y = R * Math.log(Math.tan(Math.PI / 4 + THREE.MathUtils.degToRad(lat) / 2));
+        const centerY = R * Math.log(Math.tan(Math.PI / 4 + THREE.MathUtils.degToRad(this.centerLat) / 2));
+        return [x, y - centerY];
     }
 
     async loadCityData(bounds) {
@@ -88,7 +90,7 @@ export class CityLoader {
             const shape = new THREE.Shape();
             
             coordinates.forEach((coord, index) => {
-                const [x, y] = this.converter.latLonToXY(coord[1], coord[0]);
+                const [x, y] = this.latLonToXY(coord[1], coord[0]);
                 if (index === 0) {
                     shape.moveTo(x, y);
                 } else {
@@ -154,7 +156,7 @@ export class CityLoader {
             tile.rotation.x = -Math.PI / 2;
             
             const [lat, lon] = this.tileToLatLon(x, y, zoom);
-            const [posX, posY] = this.converter.latLonToXY(lon, lat);
+            const [posX, posY] = this.latLonToXY(lat, lon);
             tile.position.set(posX, 0, posY);
             
             this.tiles.add(tile);
