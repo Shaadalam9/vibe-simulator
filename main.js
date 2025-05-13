@@ -1,4 +1,11 @@
 import * as THREE from 'three';
+import { CityLoader } from './CityLoader.js';
+
+// Leiden coordinates
+const LEIDEN_CENTER = {
+    lat: 52.1601,
+    lon: 4.4970
+};
 
 function seededRandom(seed) {
   let x = Math.sin(seed++) * 10000;
@@ -210,6 +217,53 @@ const hemisphereLight = new THREE.HemisphereLight(0xfffaf0, 0x080820, 0.5);
 scene.add(hemisphereLight);
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
 scene.add(ambientLight);
+
+// Initialize CityLoader for Leiden
+console.log('Initializing CityLoader...');
+const cityLoader = new CityLoader(scene, LEIDEN_CENTER.lat, LEIDEN_CENTER.lon);
+
+// Load a small area of Leiden (adjust bounds as needed)
+const bounds = {
+    minLat: LEIDEN_CENTER.lat -
+     0.005,
+    maxLat: LEIDEN_CENTER.lat + 0.005,
+    minLon: LEIDEN_CENTER.lon - 0.005,
+    maxLon: LEIDEN_CENTER.lon + 0.005
+};
+
+// Load city data and map tiles
+async function init() {
+    try {
+        console.log('Starting city initialization...');
+        
+        // Position camera to view the city
+        camera.position.set(0, 50, 100);
+        camera.lookAt(0, 0, 0);
+        
+        // Load city data first
+        console.log('Loading city data...');
+        await cityLoader.loadCityData(bounds);
+        
+        // Then load map tiles
+        console.log('Loading map tiles...');
+        await cityLoader.loadMapTiles(bounds);
+        
+        console.log('City initialization complete');
+    } catch (error) {
+        console.error('Error initializing city:', error);
+    }
+}
+
+// Add loading indicator
+const loadingDiv = document.createElement('div');
+loadingDiv.style.position = 'absolute';
+loadingDiv.style.top = '10px';
+loadingDiv.style.left = '10px';
+loadingDiv.style.color = 'white';
+loadingDiv.style.fontFamily = 'Arial, sans-serif';
+loadingDiv.style.fontSize = '14px';
+loadingDiv.style.textShadow = '1px 1px 1px black';
+document.body.appendChild(loadingDiv);
 
 // Create and add sky
 const sky = new Sky();
@@ -651,7 +705,7 @@ function updateChunks() {
 
 // Animation loop
 function animate() {
-  requestAnimationFrame(animate);
+    requestAnimationFrame(animate);
 
     // Update speed
     if (keys['w']) {
@@ -691,7 +745,7 @@ function animate() {
     // Animate clouds
     clouds.animate();
 
-  renderer.render(scene, camera);
+    renderer.render(scene, camera);
 }
 
 // Handle window resizing
@@ -701,5 +755,13 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-animate();
+// Start the application
+console.log('Starting application...');
+init().then(() => {
+    console.log('Initialization complete, starting animation loop');
+    animate();
+}).catch(error => {
+    console.error('Failed to initialize:', error);
+    loadingDiv.textContent = 'Error loading city data. Please check console for details.';
+});
   

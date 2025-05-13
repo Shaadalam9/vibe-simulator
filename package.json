@@ -1,17 +1,18 @@
 {
-  "name": "car-in-city-new",
-  "private": true,
-  "version": "0.0.0",
+  "name": "vibe-simulator",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
-  "devDependencies": {
-    "vite": "^6.3.1"
-  },
   "dependencies": {
-    "three": "^0.175.0"
+    "three": "^0.160.0",
+    "three-geo": "^1.0.0",
+    "osmtogeojson": "^3.0.0-beta.5"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
   }
 }
