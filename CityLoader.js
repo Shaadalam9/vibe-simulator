@@ -88,8 +88,7 @@ export class CityLoader {
             const shape = new THREE.Shape();
             
             coordinates.forEach((coord, index) => {
-                const [x, y] = (coord[1], coord[0]);latLonToXY(coord[1], coord[0], this.centerLat, this.centerLon);
-
+                const [x, y] = this.converter.latLonToXY(coord[1], coord[0]);
                 if (index === 0) {
                     shape.moveTo(x, y);
                 } else {
@@ -155,7 +154,7 @@ export class CityLoader {
             tile.rotation.x = -Math.PI / 2;
             
             const [lat, lon] = this.tileToLatLon(x, y, zoom);
-            const [posX, posY] = const [x, y] = latLonToXY(coord[1], coord[0], this.centerLat, this.centerLon);
+            const [posX, posY] = this.converter.latLonToXY(lon, lat);
             tile.position.set(posX, 0, posY);
             
             this.tiles.add(tile);
