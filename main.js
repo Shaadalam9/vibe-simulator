@@ -1,6 +1,93 @@
 import * as THREE from 'three';
 import { CityLoader } from './CityLoader.js';
 
+// Add texture loader
+const textureLoader = new THREE.TextureLoader();
+
+// Create environment map for reflections
+function createEnvironmentMap() {
+    const envCanvas = document.createElement('canvas');
+    envCanvas.width = 512;
+    envCanvas.height = 512;
+    const envContext = envCanvas.getContext('2d');
+
+    // Create sky gradient
+    const skyGradient = envContext.createLinearGradient(0, 0, 0, 512);
+    skyGradient.addColorStop(0, '#87CEEB');
+    skyGradient.addColorStop(1, '#E0F7FF');
+    envContext.fillStyle = skyGradient;
+    envContext.fillRect(0, 0, 512, 512);
+
+    // Add some clouds
+    for (let i = 0; i < 10; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 256;
+        const radius = Math.random() * 50 + 30;
+        envContext.beginPath();
+        envContext.arc(x, y, radius, 0, Math.PI * 2);
+        envContext.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        envContext.fill();
+    }
+
+    const envTexture = new THREE.CanvasTexture(envCanvas);
+    return new THREE.WebGLCubeRenderTarget(512).fromEquirectangularTexture(envTexture);
+}
+
+// Create procedural textures for car materials
+function createCarTextures() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const context = canvas.getContext('2d');
+
+    // Create metallic paint texture
+    const paintGradient = context.createLinearGradient(0, 0, 0, 512);
+    paintGradient.addColorStop(0, '#ff0000');
+    paintGradient.addColorStop(0.5, '#cc0000');
+    paintGradient.addColorStop(1, '#ff0000');
+    context.fillStyle = paintGradient;
+    context.fillRect(0, 0, 512, 512);
+
+    // Add noise for metallic effect
+    for (let i = 0; i < 10000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const brightness = Math.random() * 50;
+        context.fillStyle = `rgba(255, 255, 255, ${brightness / 255})`;
+        context.fillRect(x, y, 1, 1);
+    }
+
+    const paintTexture = new THREE.CanvasTexture(canvas);
+    paintTexture.wrapS = THREE.RepeatWrapping;
+    paintTexture.wrapT = THREE.RepeatWrapping;
+    paintTexture.repeat.set(4, 2);
+
+    // Create normal map for paint
+    const normalCanvas = document.createElement('canvas');
+    normalCanvas.width = 512;
+    normalCanvas.height = 512;
+    const normalContext = normalCanvas.getContext('2d');
+    
+    // Generate normal map
+    for (let i = 0; i < 1000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const radius = Math.random() * 20 + 10;
+        const gradient = normalContext.createRadialGradient(x, y, 0, x, y, radius);
+        gradient.addColorStop(0, 'rgb(128, 128, 255)');
+        gradient.addColorStop(1, 'rgb(128, 128, 128)');
+        normalContext.fillStyle = gradient;
+        normalContext.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    }
+
+    const normalMap = new THREE.CanvasTexture(normalCanvas);
+    normalMap.wrapS = THREE.RepeatWrapping;
+    normalMap.wrapT = THREE.RepeatWrapping;
+    normalMap.repeat.set(4, 2);
+
+    return { paintTexture, normalMap };
+}
+
 // Leiden coordinates
 const LEIDEN_CENTER = {
     lat: 52.1601,
@@ -215,12 +302,13 @@ scene.add(sunLight);
 // Add a secondary light for better ambient illumination
 const hemisphereLight = new THREE.HemisphereLight(0xfffaf0, 0x080820, 0.5);
 scene.add(hemisphereLight);
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+
+// Update ambient light for better overall visibility
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
 scene.add(ambientLight);
 
-// Initialize CityLoader for Leiden
-console.log('Initializing CityLoader...');
-const cityLoader = new CityLoader(scene, LEIDEN_CENTER.lat, LEIDEN_CENTER.lon);
+// Initialize city loader
+const cityLoader = new CityLoader(scene, LEIDEN_CENTER.lat, LEIDEN_CENTER.lon, renderer, camera);
 
 // Load a small area of Leiden (adjust bounds as needed)
 const bounds = {
@@ -237,20 +325,39 @@ async function init() {
         console.log('Starting city initialization...');
         
         // Position camera to view the city
-        camera.position.set(0, 50, 100);
+        camera.position.set(0, 5, 10);  // Start closer to the car
         camera.lookAt(0, 0, 0);
+        
+        // Check if CityLoader is properly initialized
+        if (!cityLoader) {
+            throw new Error('CityLoader not properly initialized');
+        }
         
         // Load city data first
         console.log('Loading city data...');
-        await cityLoader.loadCityData(bounds);
+        try {
+            await cityLoader.loadCityData(bounds);
+        } catch (error) {
+            console.warn('Warning: Could not load city data:', error);
+            // Create a basic city layout as fallback
+            createFallbackCity();
+        }
         
         // Then load map tiles
         console.log('Loading map tiles...');
-        await cityLoader.loadMapTiles(bounds);
+        try {
+            await cityLoader.loadMapTiles(bounds);
+        } catch (error) {
+            console.warn('Warning: Could not load map tiles:', error);
+            // Continue without map tiles
+        }
         
         console.log('City initialization complete');
     } catch (error) {
         console.error('Error initializing city:', error);
+        loadingDiv.textContent = 'Error initializing city. Some features may be limited.';
+        // Create fallback city even if initialization fails
+        createFallbackCity();
     }
 }
 
@@ -295,14 +402,12 @@ const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
 sun.add(sunGlow);
 
 // Create lens flare for sun
-const textureLoader = new THREE.TextureLoader();
 const flareColor = new THREE.Color(0xffffeb);
 
 // Create the ground plane with better material
 const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
-const groundMaterial = new THREE.MeshPhongMaterial({ 
+const groundMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x1a472a,
-    shininess: 5,
     roughness: 0.8,
     metalness: 0.2,
     side: THREE.DoubleSide 
@@ -376,44 +481,59 @@ function createRoadSegment(x, z) {
 function createBuilding(type = null) {
     const building = new THREE.Group();
     if (!type) {
-        const types = ['modern', 'classic', 'skyscraper', 'house'];
+        const types = ['modern', 'classic', 'skyscraper', 'house', 'office'];
         type = types[Math.floor(Math.random() * types.length)];
     }
-    let height, width, depth, color;
+    
+    let height, width, depth, color, style;
     switch(type) {
         case 'skyscraper':
-            height = Math.random() * 60 + 60;
-            width = Math.random() * 10 + 15;
-            depth = Math.random() * 10 + 15;
-            color = 0xcccccc;
+            height = Math.random() * 80 + 100;
+            width = Math.random() * 15 + 20;
+            depth = Math.random() * 15 + 20;
+            color = 0x88aacc;
+            style = 'modern';
             break;
         case 'modern':
-            height = Math.random() * 30 + 20;
-            width = Math.random() * 15 + 20;
-            depth = Math.random() * 10 + 20;
-            color = 0x999999;
+            height = Math.random() * 40 + 30;
+            width = Math.random() * 20 + 25;
+            depth = Math.random() * 15 + 25;
+            color = 0xcccccc;
+            style = 'modern';
+            break;
+        case 'office':
+            height = Math.random() * 30 + 40;
+            width = Math.random() * 25 + 30;
+            depth = Math.random() * 20 + 30;
+            color = 0x99aabb;
+            style = 'modern';
             break;
         case 'classic':
-            height = Math.random() * 20 + 10;
-            width = Math.random() * 15 + 20;
-            depth = Math.random() * 10 + 15;
-            color = 0xbfa77a;
+            height = Math.random() * 25 + 15;
+            width = Math.random() * 20 + 25;
+            depth = Math.random() * 15 + 20;
+            color = 0xd4b483;
+            style = 'classic';
             break;
         case 'house':
         default:
-            height = Math.random() * 8 + 6;
-            width = Math.random() * 8 + 8;
-            depth = Math.random() * 8 + 8;
-            color = 0xd9c9a9;
+            height = Math.random() * 10 + 8;
+            width = Math.random() * 10 + 12;
+            depth = Math.random() * 10 + 12;
+            color = 0xe8d0b0;
+            style = 'classic';
             break;
     }
-    // Main structure
+
+    // Main structure with enhanced materials
     const buildingMaterial = new THREE.MeshPhysicalMaterial({
         color: color,
-        roughness: 0.7,
-        metalness: 0.2,
-        clearcoat: 0.1
+        roughness: style === 'modern' ? 0.3 : 0.7,
+        metalness: style === 'modern' ? 0.8 : 0.2,
+        clearcoat: style === 'modern' ? 0.5 : 0.1,
+        envMapIntensity: 1.0
     });
+
     const mainStructure = new THREE.Mesh(
         new THREE.BoxGeometry(width, height, depth),
         buildingMaterial
@@ -422,49 +542,92 @@ function createBuilding(type = null) {
     mainStructure.castShadow = true;
     mainStructure.receiveShadow = true;
     building.add(mainStructure);
-    // Add windows for tall buildings
-    if (type !== 'house') {
-        const windowMaterial = new THREE.MeshPhysicalMaterial({
-            color: 0x88ccff,
-            metalness: 0.9,
-            roughness: 0.1,
-            transparent: true,
-            opacity: 0.7,
-            clearcoat: 1.0
-        });
-        const sides = [
-            { axis: 'z', value: depth/2, rotation: 0 },
-            { axis: 'z', value: -depth/2, rotation: Math.PI },
-            { axis: 'x', value: width/2, rotation: Math.PI/2 },
-            { axis: 'x', value: -width/2, rotation: -Math.PI/2 }
-        ];
-        sides.forEach(side => {
-            for (let y = 2; y < height - 2; y += 3) {
-                for (let x = -width/2 + 2; x < width/2 - 2; x += 3) {
-                    const window = new THREE.Mesh(
-                        new THREE.BoxGeometry(2, 2, 0.1),
-                        windowMaterial
-                    );
-                    if (side.axis === 'z') {
-                        window.position.set(x, y, side.value);
-                    } else {
-                        window.position.set(side.value, y, x);
-                        window.rotation.y = side.rotation;
-                    }
-                    building.add(window);
+
+    // Add windows
+    const glassMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x88ccff,
+        metalness: 0.9,
+        roughness: 0.1,
+        transparent: true,
+        opacity: 0.7,
+        clearcoat: 1.0,
+        transmission: 0.95
+    });
+
+    const windowSize = 2;
+    const windowSpacing = 3;
+    const sides = [
+        { axis: 'z', value: depth/2, rotation: 0 },
+        { axis: 'z', value: -depth/2, rotation: Math.PI },
+        { axis: 'x', value: width/2, rotation: Math.PI/2 },
+        { axis: 'x', value: -width/2, rotation: -Math.PI/2 }
+    ];
+
+    sides.forEach(side => {
+        for (let y = 2; y < height - 2; y += windowSpacing) {
+            for (let x = -width/2 + 2; x < width/2 - 2; x += windowSpacing) {
+                const window = new THREE.Mesh(
+                    new THREE.BoxGeometry(windowSize, windowSize, 0.1),
+                    glassMaterial
+                );
+                if (side.axis === 'z') {
+                    window.position.set(x, y, side.value);
+                } else {
+                    window.position.set(side.value, y, x);
+                    window.rotation.y = side.rotation;
                 }
+                building.add(window);
             }
-        });
+        }
+    });
+
+    // Add architectural features based on style
+    if (style === 'modern') {
+        if (type === 'skyscraper') {
+            // Add antenna/spire
+            const spireGeometry = new THREE.CylinderGeometry(0.5, 0.5, height * 0.1, 8);
+            const spireMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0xcccccc,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+            const spire = new THREE.Mesh(spireGeometry, spireMaterial);
+            spire.position.y = height + height * 0.05;
+            building.add(spire);
+        }
     } else {
-        // Add a roof for houses
-        const roof = new THREE.Mesh(
-            new THREE.ConeGeometry(width * 0.7, 3, 4),
-            new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
-        );
-        roof.position.y = height + 1.5;
-        roof.rotation.y = Math.PI / 4;
-        building.add(roof);
+        if (type === 'house') {
+            // Add pitched roof
+            const roofGeometry = new THREE.ConeGeometry(width * 0.7, height * 0.4, 4);
+            const roofMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0x8b4513,
+                roughness: 0.8,
+                metalness: 0.1
+            });
+            const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+            roof.position.y = height + height * 0.2;
+            roof.rotation.y = Math.PI / 4;
+            building.add(roof);
+
+            // Add chimney
+            const chimneyGeometry = new THREE.BoxGeometry(1, height * 0.3, 1);
+            const chimney = new THREE.Mesh(chimneyGeometry, roofMaterial);
+            chimney.position.set(width * 0.2, height + height * 0.35, depth * 0.2);
+            building.add(chimney);
+        } else {
+            // Add cornice for classic buildings
+            const corniceGeometry = new THREE.BoxGeometry(width + 1, 1, depth + 1);
+            const corniceMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0xcccccc,
+                roughness: 0.7,
+                metalness: 0.2
+            });
+            const cornice = new THREE.Mesh(corniceGeometry, corniceMaterial);
+            cornice.position.y = height;
+            building.add(cornice);
+        }
     }
+
     return building;
 }
 
@@ -585,72 +748,157 @@ function createCityChunk(chunkX, chunkZ) {
 function createCar() {
     const car = new THREE.Group();
 
-    // Body
-    const body = new THREE.Mesh(
-        new THREE.BoxGeometry(4, 1.5, 2),
-        new THREE.MeshPhysicalMaterial({ 
-            color: 0xff0000,
-            metalness: 0.6,
-            roughness: 0.4,
-            clearcoat: 0.5
-        })
-    );
-    body.position.y = 1;
+    // Main body - luxury sports car proportions
+    const bodyGeometry = new THREE.BoxGeometry(4.0, 1.2, 2.0);  // Reduced size
+    const bodyMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x00ffff,  // Bright cyan color
+        metalness: 0.9,
+        roughness: 0.1,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        envMapIntensity: 1.5,
+        reflectivity: 1.0,
+        transmission: 0.0,
+        thickness: 0.5,
+        ior: 2.5
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.position.y = 0.6;  // Lowered position
     car.add(body);
 
-    // Roof
-    const roof = new THREE.Mesh(
-        new THREE.BoxGeometry(2, 1.2, 1.8),
-        new THREE.MeshPhysicalMaterial({ 
-            color: 0xff0000,
-            metalness: 0.6,
-            roughness: 0.4,
-            clearcoat: 0.5
-        })
-    );
-    roof.position.set(-0.5, 2.35, 0);
+    // Front section - aerodynamic design
+    const frontGeometry = new THREE.BoxGeometry(1.2, 0.8, 2.0);  // Adjusted size
+    const front = new THREE.Mesh(frontGeometry, bodyMaterial);
+    front.position.set(1.5, 0.6, 0);  // Adjusted position
+    car.add(front);
+
+    // Hood - curved and aerodynamic
+    const hoodGeometry = new THREE.BoxGeometry(1.5, 0.3, 2.0);  // Adjusted size
+    const hood = new THREE.Mesh(hoodGeometry, bodyMaterial);
+    hood.position.set(0.8, 0.9, 0);  // Adjusted position
+    hood.rotation.x = -0.1;
+    car.add(hood);
+
+    // Roof - low and sleek
+    const roofGeometry = new THREE.BoxGeometry(2.0, 0.8, 1.8);  // Adjusted size
+    const roof = new THREE.Mesh(roofGeometry, bodyMaterial);
+    roof.position.set(-0.3, 1.3, 0);  // Adjusted position
+    roof.rotation.x = 0.05;
     car.add(roof);
 
-    // Wheels
-    const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
-    const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-    
-    [-1.5, 1.5].forEach(x => {
-        [-0.8, 0.8].forEach(z => {
-            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            wheel.rotation.z = Math.PI / 2;
-            wheel.position.set(x, 0.4, z);
-            car.add(wheel);
-        });
-    });
-
-    // Windows
-    const windowMaterial = new THREE.MeshPhysicalMaterial({
-        color: 0x222222,
+    // Enhanced glass material
+    const glassMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x88ccff,
         metalness: 0.9,
         roughness: 0.1,
         transparent: true,
-        opacity: 0.8
+        opacity: 0.6,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        transmission: 0.95,
+        thickness: 0.5,
+        ior: 1.5,
+        reflectivity: 1.0
     });
 
-    // Windshield
-    const windshield = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.8, 1),
-        windowMaterial
-    );
-    windshield.position.set(0.7, 2, 0);
-    windshield.rotation.x = -Math.PI / 6;
+    // Windshield with proper angle
+    const windshieldGeometry = new THREE.PlaneGeometry(1.8, 1.0);  // Adjusted size
+    const windshield = new THREE.Mesh(windshieldGeometry, glassMaterial);
+    windshield.position.set(0.8, 1.3, 0);  // Adjusted position
+    windshield.rotation.x = -Math.PI / 4;
     car.add(windshield);
 
-    // Headlights
-    const headlightGeometry = new THREE.CircleGeometry(0.2, 16);
-    const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xffffee });
-    
-    [-0.8, 0.8].forEach(z => {
-        const headlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
-        headlight.position.set(2, 1, z);
-        headlight.rotation.y = Math.PI / 2;
-        car.add(headlight);
+    // Wheels with detailed rims
+    const wheelPositions = [
+        { x: -1.2, z: -1.0, camber: -0.05 },  // Front left
+        { x: -1.2, z: 1.0, camber: 0.05 },    // Front right
+        { x: 1.2, z: -1.0, camber: -0.02 },   // Rear left
+        { x: 1.2, z: 1.0, camber: 0.02 }      // Rear right
+    ];
+
+    wheelPositions.forEach(pos => {
+        // Tire
+        const tireGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 32);  // Adjusted size
+        const tireMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0x111111,
+            metalness: 0.1,
+            roughness: 0.8,
+            clearcoat: 0.1
+        });
+        const tire = new THREE.Mesh(tireGeometry, tireMaterial);
+        tire.rotation.z = Math.PI / 2;
+        tire.rotation.y = pos.camber;
+        tire.position.set(pos.x, 0.4, pos.z);  // Adjusted position
+        car.add(tire);
+
+        // Rim
+        const rimGeometry = new THREE.CylinderGeometry(0.35, 0.35, 0.31, 32);  // Adjusted size
+        const rimMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xcccccc,
+            metalness: 0.9,
+            roughness: 0.1,
+            clearcoat: 1.0
+        });
+        const rim = new THREE.Mesh(rimGeometry, rimMaterial);
+        rim.rotation.z = Math.PI / 2;
+        rim.rotation.y = pos.camber;
+        rim.position.set(pos.x, 0.4, pos.z);  // Adjusted position
+        car.add(rim);
+
+        // Add detailed spokes
+        for (let i = 0; i < 10; i++) {
+            const spokeGeometry = new THREE.BoxGeometry(0.3, 0.04, 0.04);  // Adjusted size
+            const spoke = new THREE.Mesh(spokeGeometry, rimMaterial);
+            spoke.position.set(pos.x, 0.4, pos.z);  // Adjusted position
+            spoke.rotation.z = (i * Math.PI * 2) / 10;
+            spoke.rotation.y = pos.camber;
+            car.add(spoke);
+        }
+    });
+
+    // Headlights with LED array
+    const headlightPositions = [-0.8, 0.8];  // Adjusted positions
+    headlightPositions.forEach(z => {
+        const headlightMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,
+            emissive: 0xffffcc,
+            emissiveIntensity: 0.5,
+            metalness: 0.9,
+            roughness: 0.1,
+            clearcoat: 1.0,
+            transparent: true,
+            opacity: 0.9
+        });
+
+        const projectorGeometry = new THREE.CylinderGeometry(0.25, 0.25, 0.08, 32);  // Adjusted size
+        const projector = new THREE.Mesh(projectorGeometry, headlightMaterial);
+        projector.position.set(2.05, 0.6, z);  // Adjusted position
+        projector.rotation.z = Math.PI / 2;
+        car.add(projector);
+
+        // Add LED array
+        for (let i = 0; i < 3; i++) {
+            const ledGeometry = new THREE.BoxGeometry(0.01, 0.04, 0.15);  // Adjusted size
+            const ledMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                emissive: 0xffffff,
+                emissiveIntensity: 0.8,
+                transparent: true,
+                opacity: 0.9
+            });
+            const led = new THREE.Mesh(ledGeometry, ledMaterial);
+            led.position.set(2.06, 0.8 + i * 0.07, z);  // Adjusted position
+            led.rotation.y = Math.PI / 2;
+            car.add(led);
+        }
+    });
+
+    // Add shadows to all parts
+    car.traverse((object) => {
+        if (object.isMesh) {
+            object.castShadow = true;
+            object.receiveShadow = true;
+        }
     });
 
     return car;
@@ -658,16 +906,63 @@ function createCar() {
 
 // Create and position car
 const car = createCar();
-car.position.set(0, 0, 0);
+car.position.set(0, 0.4, 0);  // Lowered position to be on the road
 scene.add(car);
 
-// Car controls
+// Add car-specific lighting
+const carLight = new THREE.SpotLight(0xffffff, 3);  // Increased intensity
+carLight.position.set(0, 15, 0);  // Raised light position
+carLight.angle = Math.PI / 3;     // Wider angle
+carLight.penumbra = 0.2;          // Softer edges
+carLight.decay = 1.5;             // Reduced decay
+carLight.distance = 100;          // Increased distance
+carLight.castShadow = true;
+carLight.shadow.mapSize.width = 2048;  // Increased shadow quality
+carLight.shadow.mapSize.height = 2048;
+scene.add(carLight);
+
+// Add a point light to highlight the car
+const pointLight = new THREE.PointLight(0xffffff, 2);  // Increased intensity
+pointLight.position.set(0, 10, 0);
+scene.add(pointLight);
+
+// Add collision detection
+function checkCollision(position, radius) {
+    // Check collision with buildings
+    cityElements.children.forEach(element => {
+        if (element.isGroup && element.children.length > 0) {
+            // Get the bounding box of the building
+            const box = new THREE.Box3().setFromObject(element);
+            
+            // Check if car is too close to building
+            if (box.containsPoint(position)) {
+                return true;
+            }
+            
+            // Check distance to building edges
+            const distance = box.distanceToPoint(position);
+            if (distance < radius) {
+                return true;
+            }
+        }
+    });
+    return false;
+}
+
+// Update car controls for better handling
 const carControls = {
     speed: 0,
-    maxSpeed: 0.8,
-    acceleration: 0.008,
-    deceleration: 0.004,
-    turnSpeed: 0.03
+    maxSpeed: 1.5,
+    minSpeed: -0.8,
+    acceleration: 0.03,
+    deceleration: 0.02,
+    brakeForce: 0.08,
+    turnSpeed: 0.04,
+    driftFactor: 0.98,
+    currentTurnSpeed: 0,
+    maxTurnSpeed: 0.06,
+    handling: 0.95,
+    collisionRadius: 2.0  // Collision detection radius
 };
 
 // Keyboard controls
@@ -707,37 +1002,101 @@ function updateChunks() {
 function animate() {
     requestAnimationFrame(animate);
 
-    // Update speed
+    // Handle acceleration and braking
     if (keys['w']) {
         carControls.speed = Math.min(carControls.speed + carControls.acceleration, carControls.maxSpeed);
     } else if (keys['s']) {
-        carControls.speed = Math.max(carControls.speed - carControls.acceleration, -carControls.maxSpeed * 0.5);
+        if (carControls.speed > 0) {
+            carControls.speed = Math.max(carControls.speed - carControls.brakeForce, 0);
+        } else {
+            carControls.speed = Math.max(carControls.speed - carControls.acceleration, carControls.minSpeed);
+        }
     } else {
-        carControls.speed *= 0.95;
+        if (carControls.speed > 0) {
+            carControls.speed = Math.max(carControls.speed - carControls.deceleration, 0);
+        } else if (carControls.speed < 0) {
+            carControls.speed = Math.min(carControls.speed + carControls.deceleration, 0);
+        }
     }
 
-    // Rotate only while moving
-    if (carControls.speed !== 0) {
+    // Handle turning with speed-dependent turning radius
+    if (Math.abs(carControls.speed) > 0.1) {
+        const speedFactor = Math.abs(carControls.speed) / carControls.maxSpeed;
         const direction = carControls.speed > 0 ? 1 : -1;
-        if (keys['a']) car.rotation.y += carControls.turnSpeed * direction;
-        if (keys['d']) car.rotation.y -= carControls.turnSpeed * direction;
+        
+        if (keys['a']) {
+            carControls.currentTurnSpeed = Math.min(
+                carControls.currentTurnSpeed + carControls.turnSpeed,
+                carControls.maxTurnSpeed * speedFactor
+            );
+        } else if (keys['d']) {
+            carControls.currentTurnSpeed = Math.max(
+                carControls.currentTurnSpeed - carControls.turnSpeed,
+                -carControls.maxTurnSpeed * speedFactor
+            );
+        } else {
+            carControls.currentTurnSpeed *= carControls.handling;
+        }
+        
+        car.rotation.y += carControls.currentTurnSpeed * direction;
+    } else {
+        carControls.currentTurnSpeed = 0;
     }
 
-    // Move the car forward/backward
-    car.position.x -= Math.sin(car.rotation.y) * carControls.speed;
-    car.position.z -= Math.cos(car.rotation.y) * carControls.speed;
+    // Calculate movement with drift effect
+    const moveX = Math.sin(car.rotation.y) * carControls.speed;
+    const moveZ = Math.cos(car.rotation.y) * carControls.speed;
+    
+    // Check for collisions before moving
+    const nextPosition = new THREE.Vector3(
+        car.position.x - moveX,
+        car.position.y,
+        car.position.z - moveZ
+    );
 
-    // Chase camera behind the car
+    if (!checkCollision(nextPosition, carControls.collisionRadius)) {
+        // Apply movement if no collision
+        car.position.x = nextPosition.x;
+        car.position.z = nextPosition.z;
+    } else {
+        // Stop the car if collision detected
+        carControls.speed = 0;
+        carControls.currentTurnSpeed = 0;
+    }
+
+    // Update car light position to follow the car
+    carLight.position.x = car.position.x;
+    carLight.position.z = car.position.z;
+    carLight.target = car;
+
+    // Update point light position
+    pointLight.position.x = car.position.x;
+    pointLight.position.z = car.position.z;
+
+    // Dynamic camera following with smooth transitions
     const cameraDistance = 10;
     const cameraHeight = 5;
-    const offsetX = Math.sin(car.rotation.y) * cameraDistance;
-    const offsetZ = Math.cos(car.rotation.y) * cameraDistance;
+    const cameraOffset = new THREE.Vector3(
+        Math.sin(car.rotation.y) * cameraDistance,
+        cameraHeight,
+        Math.cos(car.rotation.y) * cameraDistance
+    );
 
-    camera.position.x = car.position.x + offsetX;
-    camera.position.y = car.position.y + cameraHeight;
-    camera.position.z = car.position.z + offsetZ;
+    camera.position.lerp(
+        new THREE.Vector3(
+            car.position.x + cameraOffset.x,
+            car.position.y + cameraOffset.y,
+            car.position.z + cameraOffset.z
+        ),
+        0.1
+    );
 
-    camera.lookAt(car.position.clone().add(new THREE.Vector3(0, 2, 0)));
+    const lookAhead = new THREE.Vector3(
+        car.position.x - Math.sin(car.rotation.y) * (carControls.speed * 3),
+        car.position.y + 1.2,
+        car.position.z - Math.cos(car.rotation.y) * (carControls.speed * 3)
+    );
+    camera.lookAt(lookAhead);
 
     // Update chunks
     updateChunks();
@@ -764,4 +1123,73 @@ init().then(() => {
     console.error('Failed to initialize:', error);
     loadingDiv.textContent = 'Error loading city data. Please check console for details.';
 });
+
+// Create a basic city layout as fallback
+function createFallbackCity() {
+    console.log('Creating fallback city layout...');
+    
+    // Create a grid of roads
+    const gridSize = 8;  // Increased grid size
+    const spacing = 30;  // Reduced spacing
+    
+    // Create horizontal roads
+    for (let i = -gridSize; i <= gridSize; i++) {
+        const road = createRoadSegment(i * spacing, 0);
+        road.rotation.y = Math.PI / 2;
+        cityElements.add(road);
+    }
+    
+    // Create vertical roads
+    for (let i = -gridSize; i <= gridSize; i++) {
+        const road = createRoadSegment(0, i * spacing);
+        cityElements.add(road);
+    }
+    
+    // Add buildings along the roads
+    for (let x = -gridSize; x <= gridSize; x++) {
+        for (let z = -gridSize; z <= gridSize; z++) {
+            if (Math.random() < 0.7) {
+                const building = createBuilding();
+                building.position.set(
+                    x * spacing + (Math.random() - 0.5) * 20,  // Reduced spread
+                    0,
+                    z * spacing + (Math.random() - 0.5) * 20   // Reduced spread
+                );
+                cityElements.add(building);
+            }
+        }
+    }
+    
+    // Add street lights
+    for (let x = -gridSize; x <= gridSize; x++) {
+        for (let z = -gridSize; z <= gridSize; z++) {
+            if (Math.random() < 0.3) {
+                const light = createStreetLight();
+                light.position.set(
+                    x * spacing + (Math.random() - 0.5) * 25,  // Reduced spread
+                    0,
+                    z * spacing + (Math.random() - 0.5) * 25   // Reduced spread
+                );
+                cityElements.add(light);
+            }
+        }
+    }
+    
+    // Add some parks
+    for (let x = -gridSize; x <= gridSize; x++) {
+        for (let z = -gridSize; z <= gridSize; z++) {
+            if (Math.random() < 0.1) {
+                const park = createPark(15 + Math.random() * 8);  // Reduced size
+                park.position.set(
+                    x * spacing + (Math.random() - 0.5) * 20,  // Reduced spread
+                    0,
+                    z * spacing + (Math.random() - 0.5) * 20   // Reduced spread
+                );
+                cityElements.add(park);
+            }
+        }
+    }
+    
+    console.log('Fallback city layout created');
+}
   
