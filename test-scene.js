@@ -1,25 +1,35 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
 // Create the scene
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+scene.background = new THREE.Color(0x87CEEB);
+scene.fog = new THREE.Fog(0x87CEEB, 100, 300);
 
 // Create the renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
 document.body.appendChild(renderer.domElement);
 
 // Create the camera
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 5, 10);
+camera.position.set(50, 50, 50);
+camera.lookAt(0, 0, 0);
 
-// Add lighting
+// Add orbit controls
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+
+// Enhanced lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
 scene.add(ambientLight);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
 directionalLight.position.set(50, 100, 50);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 2048;
@@ -33,33 +43,40 @@ directionalLight.shadow.camera.bottom = -100;
 scene.add(directionalLight);
 
 // Create ground with texture
-function createGroundTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
-    const context = canvas.getContext('2d');
+const groundTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg');
+groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+groundTexture.repeat.set(25, 25);
+groundTexture.anisotropy = 16;
 
-    // Base color
-    context.fillStyle = '#1a1a1a';
-    context.fillRect(0, 0, 512, 512);
+// Create materials first
+const roadMaterial = new THREE.MeshStandardMaterial({
+    color: 0x333333,
+    roughness: 0.9,
+    metalness: 0.1
+});
 
-    // Add noise
-    for (let i = 0; i < 10000; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const size = Math.random() * 2 + 1;
-        const brightness = Math.random() * 30;
-        context.fillStyle = `rgba(255, 255, 255, ${brightness / 255})`;
-        context.fillRect(x, y, size, size);
-    }
+const sidewalkMaterial = new THREE.MeshStandardMaterial({
+    color: 0xcccccc,
+    roughness: 0.8,
+    metalness: 0.1
+});
 
-    return new THREE.CanvasTexture(canvas);
-}
+const lineMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.5,
+    metalness: 0.1
+});
 
+// Increase ground size
+const groundSize = 400;
+const roadWidth = 15;
+const blockSize = 60;
+
+// Update ground
 const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(1000, 1000),
+    new THREE.PlaneGeometry(groundSize, groundSize),
     new THREE.MeshStandardMaterial({ 
-        map: createGroundTexture(),
+        map: groundTexture,
         roughness: 0.8,
         metalness: 0.2
     })
@@ -68,728 +85,945 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Create realistic tree
-function createTree(x, z, type = 'random') {
-    const tree = new THREE.Group();
-    
-    // Tree trunk
-    const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, 5, 8);
-    const trunkMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x4d2926,
-        roughness: 0.9
-    });
-    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-    trunk.position.y = 2.5;
-    trunk.castShadow = true;
-    tree.add(trunk);
+// Update road dimensions
+const roadLength = groundSize;
 
-    // Tree foliage
-    if (type === 'pine') {
-        // Pine tree
-        const foliageGeometry = new THREE.ConeGeometry(3, 8, 8);
-        const foliageMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x1e4020,
-            roughness: 0.8
-        });
-        const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
-        foliage.position.y = 7;
-        foliage.castShadow = true;
-        tree.add(foliage);
-    } else {
-        // Deciduous tree
-        const foliageColors = [0x2d5a27, 0x1e4020, 0x153017];
-        const foliageLayers = 3;
-        
-        for (let i = 0; i < foliageLayers; i++) {
-            const foliageGeometry = new THREE.SphereGeometry(3 - i * 0.5, 8, 8);
-            const foliageMaterial = new THREE.MeshStandardMaterial({ 
-                color: foliageColors[i],
-                roughness: 0.8
-            });
-            const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
-            foliage.position.y = 5 + i * 2;
-            foliage.castShadow = true;
-            tree.add(foliage);
-        }
-    }
+// Create main roads
+const mainRoads = [
+    { x: 0, z: 0, width: roadWidth, length: roadLength, rotation: 0 },
+    { x: 0, z: 0, width: roadLength, length: roadWidth, rotation: Math.PI / 2 },
+    { x: -groundSize/4, z: 0, width: roadWidth, length: roadLength, rotation: 0 },
+    { x: groundSize/4, z: 0, width: roadWidth, length: roadLength, rotation: 0 },
+    { x: 0, z: -groundSize/4, width: roadLength, length: roadWidth, rotation: Math.PI / 2 },
+    { x: 0, z: groundSize/4, width: roadLength, length: roadWidth, rotation: Math.PI / 2 }
+];
 
-    tree.position.set(x, 0, z);
-    return tree;
-}
+mainRoads.forEach(road => {
+    const roadMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(road.width, road.length),
+        roadMaterial
+    );
+    roadMesh.rotation.x = -Math.PI / 2;
+    roadMesh.position.set(road.x, 0.01, road.z);
+    roadMesh.rotation.z = road.rotation;
+    roadMesh.receiveShadow = true;
+    scene.add(roadMesh);
 
-// Create realistic building
-function createBuilding(x, z, type = 'random') {
-    const building = new THREE.Group();
-    let height, width, depth, color;
+    // Add sidewalks
+    const sidewalkMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(road.width + 4, road.length),
+        sidewalkMaterial
+    );
+    sidewalkMesh.rotation.x = -Math.PI / 2;
+    sidewalkMesh.position.set(road.x, 0.02, road.z);
+    sidewalkMesh.rotation.z = road.rotation;
+    sidewalkMesh.receiveShadow = true;
+    scene.add(sidewalkMesh);
 
-    switch(type) {
-        case 'skyscraper':
-            height = 60 + Math.random() * 40;
-            width = 25;
-            depth = 25;
-            color = 0x88aacc;
-            break;
-        case 'office':
-            height = 30 + Math.random() * 20;
-            width = 20;
-            depth = 20;
-            color = 0xcccccc;
-            break;
-        case 'residential':
-            height = 15 + Math.random() * 15;
-            width = 15;
-            depth = 15;
-            color = 0xd4b483;
-            break;
-        case 'modern':
-            height = 40 + Math.random() * 20;
-            width = 30;
-            depth = 30;
-            color = 0x88ccff;
-            break;
-        default:
-            height = 20 + Math.random() * 20;
-            width = 18;
-            depth = 18;
-            color = 0xcccccc;
-    }
+    // Add road markings
+    const centerLine = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.3, road.length),
+        lineMaterial
+    );
+    centerLine.rotation.x = -Math.PI / 2;
+    centerLine.position.set(road.x, 0.03, road.z);
+    centerLine.rotation.z = road.rotation;
+    scene.add(centerLine);
+});
 
-    // Main structure
-    const mainGeometry = new THREE.BoxGeometry(width, height, depth);
-    const mainMaterial = new THREE.MeshStandardMaterial({
-        color: color,
-        metalness: 0.8,
-        roughness: 0.2
-    });
-    const main = new THREE.Mesh(mainGeometry, mainMaterial);
-    main.position.y = height / 2;
-    main.castShadow = true;
-    building.add(main);
+// Create sidewalks with texture
+const sidewalkTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/brick_bump.jpg');
+sidewalkTexture.wrapS = sidewalkTexture.wrapT = THREE.RepeatWrapping;
+sidewalkTexture.repeat.set(2, 2);
 
-    // Windows
-    const windowRows = Math.floor(height / 4);
-    const windowCols = Math.floor(width / 5);
-    const windowGeometry = new THREE.PlaneGeometry(1.5, 2.5);
+// Create building with windows and texture
+function createBuilding(x, z, width, depth, height) {
+    const buildingTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/brick_diffuse.jpg');
+    buildingTexture.wrapS = buildingTexture.wrapT = THREE.RepeatWrapping;
+    buildingTexture.repeat.set(width/10, height/10);
+
+    const building = new THREE.Mesh(
+        new THREE.BoxGeometry(width, height, depth),
+        new THREE.MeshStandardMaterial({
+            map: buildingTexture,
+            roughness: 0.7,
+            metalness: 0.3
+        })
+    );
+    building.position.set(x, height / 2, z);
+    building.castShadow = true;
+    building.receiveShadow = true;
+    scene.add(building);
+
+    // Add windows
     const windowMaterial = new THREE.MeshStandardMaterial({
         color: 0x88ccff,
-        metalness: 1,
-        roughness: 0,
-        transparent: true,
-        opacity: 0.7
+        roughness: 0.2,
+        metalness: 0.8,
+        emissive: 0x88ccff,
+        emissiveIntensity: 0.2
     });
 
-    // Add windows to each side
+    const windowSize = 2;
+    const windowSpacing = 4;
+    const windowRows = Math.floor(height / windowSpacing);
+    const windowCols = Math.floor(width / windowSpacing);
+
+    // Add windows to all sides
     for (let row = 0; row < windowRows; row++) {
         for (let col = 0; col < windowCols; col++) {
-            // Front windows
-            const frontWindow = new THREE.Mesh(windowGeometry, windowMaterial);
-            frontWindow.position.set(
-                -width/2 + 2 + col * 5,
-                4 + row * 4,
-                depth/2 + 0.1
-            );
-            building.add(frontWindow);
+            if (Math.random() > 0.3) {
+                // Front windows
+                const window = new THREE.Mesh(
+                    new THREE.PlaneGeometry(windowSize, windowSize),
+                    windowMaterial
+                );
+                window.position.set(
+                    x - width/2 + col * windowSpacing + windowSpacing/2,
+                    row * windowSpacing + windowSpacing/2,
+                    z - depth/2 - 0.1
+                );
+                window.rotation.y = Math.PI;
+                scene.add(window);
 
-            // Back windows
-            const backWindow = new THREE.Mesh(windowGeometry, windowMaterial);
-            backWindow.position.set(
-                -width/2 + 2 + col * 5,
-                4 + row * 4,
-                -depth/2 - 0.1
-            );
-            backWindow.rotation.y = Math.PI;
-            building.add(backWindow);
+                // Back windows
+                const backWindow = window.clone();
+                backWindow.position.z = z + depth/2 + 0.1;
+                backWindow.rotation.y = 0;
+                scene.add(backWindow);
 
-            // Side windows
-            const sideWindow = new THREE.Mesh(windowGeometry, windowMaterial);
-            sideWindow.position.set(
-                width/2 + 0.1,
-                4 + row * 4,
-                -depth/2 + 2 + col * 5
-            );
-            sideWindow.rotation.y = Math.PI / 2;
-            building.add(sideWindow);
+                // Left side windows
+                const leftWindow = window.clone();
+                leftWindow.position.set(
+                    x - width/2 - 0.1,
+                    row * windowSpacing + windowSpacing/2,
+                    z - depth/2 + col * windowSpacing + windowSpacing/2
+                );
+                leftWindow.rotation.y = -Math.PI / 2;
+                scene.add(leftWindow);
 
-            const sideWindow2 = new THREE.Mesh(windowGeometry, windowMaterial);
-            sideWindow2.position.set(
-                -width/2 - 0.1,
-                4 + row * 4,
-                -depth/2 + 2 + col * 5
-            );
-            sideWindow2.rotation.y = -Math.PI / 2;
-            building.add(sideWindow2);
+                // Right side windows
+                const rightWindow = window.clone();
+                rightWindow.position.set(
+                    x + width/2 + 0.1,
+                    row * windowSpacing + windowSpacing/2,
+                    z - depth/2 + col * windowSpacing + windowSpacing/2
+                );
+                rightWindow.rotation.y = Math.PI / 2;
+                scene.add(rightWindow);
+            }
         }
     }
 
-    // Add architectural details based on building type
-    if (type === 'skyscraper') {
-        // Add antenna
-        const antennaGeometry = new THREE.CylinderGeometry(0.2, 0.2, 10, 8);
-        const antennaMaterial = new THREE.MeshStandardMaterial({
-            color: 0x666666,
-            metalness: 0.9,
-            roughness: 0.1
+    // Add roof details
+    if (Math.random() > 0.5) {
+        const roofGeometry = new THREE.BoxGeometry(width + 2, 2, depth + 2);
+        const roofMaterial = new THREE.MeshStandardMaterial({
+            color: 0x444444,
+            roughness: 0.8,
+            metalness: 0.2
         });
-        const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
-        antenna.position.y = height + 5;
-        building.add(antenna);
+        const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+        roof.position.set(x, height + 1, z);
+        roof.castShadow = true;
+        scene.add(roof);
+    }
 
-        // Add decorative top
-        const topGeometry = new THREE.ConeGeometry(width/2, 10, 4);
-        const topMaterial = new THREE.MeshStandardMaterial({
+    // Add entrance
+    const entranceWidth = 4;
+    const entranceHeight = 6;
+    const entrance = new THREE.Mesh(
+        new THREE.BoxGeometry(entranceWidth, entranceHeight, 0.5),
+        new THREE.MeshStandardMaterial({
             color: 0x666666,
-            metalness: 0.9,
-            roughness: 0.1
+            roughness: 0.5,
+            metalness: 0.8
+        })
+    );
+    entrance.position.set(
+        x - width/2 + entranceWidth/2,
+        entranceHeight/2,
+        z - depth/2 - 0.2
+    );
+    scene.add(entrance);
+}
+
+// Create traffic lights with more detail
+function createTrafficLight(x, z, rotation = 0) {
+    const poleGeometry = new THREE.CylinderGeometry(0.2, 0.2, 8, 8);
+    const poleMaterial = new THREE.MeshStandardMaterial({
+        color: 0x333333,
+        roughness: 0.7,
+        metalness: 0.5
+    });
+    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+    pole.position.set(x, 4, z);
+    pole.castShadow = true;
+    scene.add(pole);
+
+    const lightBoxGeometry = new THREE.BoxGeometry(1, 3, 0.5);
+    const lightBoxMaterial = new THREE.MeshStandardMaterial({
+        color: 0x222222,
+        roughness: 0.5,
+        metalness: 0.8
+    });
+    const lightBox = new THREE.Mesh(lightBoxGeometry, lightBoxMaterial);
+    lightBox.position.set(x, 8, z);
+    lightBox.rotation.y = rotation;
+    scene.add(lightBox);
+
+    // Add lights with glow
+    const lightPositions = [
+        { y: 0.8, color: 0xff0000 },
+        { y: 0, color: 0xffff00 },
+        { y: -0.8, color: 0x00ff00 }
+    ];
+
+    lightPositions.forEach(({ y, color }) => {
+        const lightGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+        const lightMaterial = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.5
         });
-        const top = new THREE.Mesh(topGeometry, topMaterial);
-        top.position.y = height + 5;
-        building.add(top);
-    } else if (type === 'modern') {
-        // Add glass facade
-        const facadeGeometry = new THREE.BoxGeometry(width + 0.2, height, depth + 0.2);
-        const facadeMaterial = new THREE.MeshStandardMaterial({
-            color: 0x88ccff,
-            metalness: 1,
-            roughness: 0,
+        const light = new THREE.Mesh(lightGeometry, lightMaterial);
+        light.position.set(x, 8 + y, z);
+        scene.add(light);
+
+        // Add glow
+        const glowGeometry = new THREE.SphereGeometry(0.4, 16, 16);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: color,
             transparent: true,
             opacity: 0.3
         });
-        const facade = new THREE.Mesh(facadeGeometry, facadeMaterial);
-        facade.position.y = height / 2;
-        building.add(facade);
-    }
-
-    building.position.set(x, 0, z);
-    return building;
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        glow.position.set(x, 8 + y, z);
+        scene.add(glow);
+    });
 }
 
-// Create traffic light
-function createTrafficLight(x, z, rotation = 0) {
-    const trafficLight = new THREE.Group();
-    
-    // Pole
-    const poleGeometry = new THREE.CylinderGeometry(0.2, 0.2, 8, 8);
-    const poleMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x333333,
-        metalness: 0.8,
-        roughness: 0.2
-    });
-    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-    pole.position.y = 4;
-    pole.castShadow = true;
-    trafficLight.add(pole);
+// Create tree with more detail
+function createTree(x, z) {
+    const treeGroup = new THREE.Group();
+    treeGroup.position.set(x, 0, z);
 
-    // Traffic light box
-    const boxGeometry = new THREE.BoxGeometry(1.2, 3, 0.8);
-    const boxMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x222222,
-        metalness: 0.5,
-        roughness: 0.5
-    });
-    const box = new THREE.Mesh(boxGeometry, boxMaterial);
-    box.position.y = 7;
-    box.castShadow = true;
-    trafficLight.add(box);
+    // Load textures
+    const textureLoader = new THREE.TextureLoader();
+    const barkTexture = textureLoader.load('https://threejs.org/examples/textures/bark.jpg');
+    const barkNormalMap = textureLoader.load('https://threejs.org/examples/textures/bark_normal.jpg');
+    const barkRoughnessMap = textureLoader.load('https://threejs.org/examples/textures/bark_roughness.jpg');
+    const leafTexture = textureLoader.load('https://threejs.org/examples/textures/leaves.jpg');
+    const leafNormalMap = textureLoader.load('https://threejs.org/examples/textures/leaves_normal.jpg');
+    const groundTexture = textureLoader.load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg');
 
-    // Lights
-    const lightGeometry = new THREE.CircleGeometry(0.3, 16);
-    const redLight = new THREE.Mesh(lightGeometry, new THREE.MeshStandardMaterial({ 
-        color: 0xff0000,
-        emissive: 0xff0000,
-        emissiveIntensity: 0.5
-    }));
-    redLight.position.set(0, 8, 0.41);
-    trafficLight.add(redLight);
-
-    const yellowLight = new THREE.Mesh(lightGeometry, new THREE.MeshStandardMaterial({ 
-        color: 0xffff00,
-        emissive: 0xffff00,
-        emissiveIntensity: 0.5
-    }));
-    yellowLight.position.set(0, 7, 0.41);
-    trafficLight.add(yellowLight);
-
-    const greenLight = new THREE.Mesh(lightGeometry, new THREE.MeshStandardMaterial({ 
-        color: 0x00ff00,
-        emissive: 0x00ff00,
-        emissiveIntensity: 0.5
-    }));
-    greenLight.position.set(0, 6, 0.41);
-    trafficLight.add(greenLight);
-
-    trafficLight.position.set(x, 0, z);
-    trafficLight.rotation.y = rotation;
-    return trafficLight;
-}
-
-// Create sidewalk
-function createSidewalk(x, z, width, length, rotation = 0) {
-    const sidewalk = new THREE.Mesh(
-        new THREE.PlaneGeometry(width, length),
-        new THREE.MeshStandardMaterial({ 
-            color: 0xcccccc,
-            roughness: 0.9
-        })
-    );
-    sidewalk.rotation.x = -Math.PI / 2;
-    sidewalk.position.set(x, 0.02, z);
-    sidewalk.rotation.z = rotation;
-    sidewalk.receiveShadow = true;
-    return sidewalk;
-}
-
-// Create bench
-function createBench(x, z, rotation = 0) {
-    const bench = new THREE.Group();
-    
-    // Bench seat
-    const seatGeometry = new THREE.BoxGeometry(2, 0.2, 0.8);
-    const seatMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x8B4513,
-        roughness: 0.9
-    });
-    const seat = new THREE.Mesh(seatGeometry, seatMaterial);
-    seat.position.y = 0.5;
-    seat.castShadow = true;
-    bench.add(seat);
-
-    // Bench back
-    const backGeometry = new THREE.BoxGeometry(2, 0.8, 0.2);
-    const backMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x8B4513,
-        roughness: 0.9
-    });
-    const back = new THREE.Mesh(backGeometry, backMaterial);
-    back.position.y = 0.9;
-    back.position.z = -0.3;
-    back.castShadow = true;
-    bench.add(back);
-
-    // Bench legs
-    const legGeometry = new THREE.BoxGeometry(0.2, 0.5, 0.8);
-    const legMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x696969,
-        metalness: 0.8,
-        roughness: 0.2
+    // Configure texture properties
+    [barkTexture, barkNormalMap, barkRoughnessMap].forEach(texture => {
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(2, 2);
     });
 
-    const leg1 = new THREE.Mesh(legGeometry, legMaterial);
-    leg1.position.set(-0.8, 0.25, 0);
-    leg1.castShadow = true;
-    bench.add(leg1);
-
-    const leg2 = new THREE.Mesh(legGeometry, legMaterial);
-    leg2.position.set(0.8, 0.25, 0);
-    leg2.castShadow = true;
-    bench.add(leg2);
-
-    bench.position.set(x, 0, z);
-    bench.rotation.y = rotation;
-    return bench;
-}
-
-// Create trash bin
-function createTrashBin(x, z, rotation = 0) {
-    const bin = new THREE.Group();
-    
-    // Bin body
-    const bodyGeometry = new THREE.CylinderGeometry(0.4, 0.4, 1, 8);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x333333,
-        metalness: 0.8,
-        roughness: 0.2
+    [leafTexture, leafNormalMap].forEach(texture => {
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(4, 4);
     });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = 0.5;
-    body.castShadow = true;
-    bin.add(body);
 
-    // Bin lid
-    const lidGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.1, 8);
-    const lidMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x444444,
-        metalness: 0.8,
-        roughness: 0.2
+    groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+    groundTexture.repeat.set(1, 1);
+
+    // Create main trunk with realistic wood structure
+    const trunkHeight = 5 + Math.random() * 2;
+    const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, trunkHeight, 12);
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+        map: barkTexture,
+        normalMap: barkNormalMap,
+        roughnessMap: barkRoughnessMap,
+        color: 0x4d2926,
+        roughness: 0.9,
+        metalness: 0.1,
+        normalScale: new THREE.Vector2(0.5, 0.5)
     });
-    const lid = new THREE.Mesh(lidGeometry, lidMaterial);
-    lid.position.y = 1.05;
-    lid.castShadow = true;
-    bin.add(lid);
+    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+    trunk.position.y = trunkHeight / 2;
+    trunk.castShadow = true;
+    treeGroup.add(trunk);
 
-    bin.position.set(x, 0, z);
-    bin.rotation.y = rotation;
-    return bin;
-}
+    // Function to create a branch with natural curve
+    function createBranch(startPoint, direction, length, radius, parent, isMainBranch = false) {
+        if (!startPoint || !direction) {
+            console.warn('Invalid branch parameters');
+            return null;
+        }
 
-// Create city
-function createCity() {
-    const city = new THREE.Group();
-    const gridSize = 5;
-    const blockSize = 50;
-    const roadWidth = 10;
-    const sidewalkWidth = 3;
-
-    // Create roads with markings and sidewalks
-    for (let i = -gridSize; i <= gridSize; i++) {
-        // Horizontal roads
-        const hRoad = new THREE.Mesh(
-            new THREE.PlaneGeometry(blockSize * (gridSize * 2 + 1), roadWidth),
-            new THREE.MeshStandardMaterial({ 
-                color: 0x333333,
-                roughness: 0.9
-            })
-        );
-        hRoad.rotation.x = -Math.PI / 2;
-        hRoad.position.set(0, 0.01, i * blockSize);
-        city.add(hRoad);
-
-        // Horizontal sidewalks
-        const hSidewalk1 = createSidewalk(0, i * blockSize - roadWidth/2 - sidewalkWidth/2, 
-            blockSize * (gridSize * 2 + 1), sidewalkWidth);
-        city.add(hSidewalk1);
+        const segments = 8;
+        const points = [];
+        const curve = new THREE.CatmullRomCurve3();
         
-        const hSidewalk2 = createSidewalk(0, i * blockSize + roadWidth/2 + sidewalkWidth/2, 
-            blockSize * (gridSize * 2 + 1), sidewalkWidth);
-        city.add(hSidewalk2);
-
-        // Road markings
-        const markingGeometry = new THREE.PlaneGeometry(blockSize * (gridSize * 2 + 1), 0.5);
-        const markingMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
-        const marking = new THREE.Mesh(markingGeometry, markingMaterial);
-        marking.rotation.x = -Math.PI / 2;
-        marking.position.set(0, 0.02, i * blockSize);
-        city.add(marking);
-
-        // Vertical roads
-        const vRoad = new THREE.Mesh(
-            new THREE.PlaneGeometry(blockSize * (gridSize * 2 + 1), roadWidth),
-            new THREE.MeshStandardMaterial({ 
-                color: 0x333333,
-                roughness: 0.9
-            })
-        );
-        vRoad.rotation.x = -Math.PI / 2;
-        vRoad.rotation.z = Math.PI / 2;
-        vRoad.position.set(i * blockSize, 0.01, 0);
-        city.add(vRoad);
-
-        // Vertical sidewalks
-        const vSidewalk1 = createSidewalk(i * blockSize - roadWidth/2 - sidewalkWidth/2, 0,
-            sidewalkWidth, blockSize * (gridSize * 2 + 1), Math.PI / 2);
-        city.add(vSidewalk1);
+        // Create points for curved branch with natural variation
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const naturalCurve = Math.sin(t * Math.PI) * length * 0.2;
+            const randomVariation = (Math.random() - 0.5) * length * 0.1;
+            const point = new THREE.Vector3(
+                startPoint.x + direction.x * length * t + randomVariation,
+                startPoint.y + direction.y * length * t + naturalCurve,
+                startPoint.z + direction.z * length * t + randomVariation
+            );
+            points.push(point);
+        }
         
-        const vSidewalk2 = createSidewalk(i * blockSize + roadWidth/2 + sidewalkWidth/2, 0,
-            sidewalkWidth, blockSize * (gridSize * 2 + 1), Math.PI / 2);
-        city.add(vSidewalk2);
-
-        // Road markings
-        const vMarking = new THREE.Mesh(markingGeometry, markingMaterial);
-        vMarking.rotation.x = -Math.PI / 2;
-        vMarking.rotation.z = Math.PI / 2;
-        vMarking.position.set(i * blockSize, 0.02, 0);
-        city.add(vMarking);
-
-        // Add traffic lights at intersections
-        if (i !== gridSize) {
-            // Traffic lights for horizontal roads
-            for (let j = -gridSize; j <= gridSize; j++) {
-                const trafficLight1 = createTrafficLight(
-                    j * blockSize + blockSize/2,
-                    i * blockSize - roadWidth/2 - 1,
-                    Math.PI
-                );
-                city.add(trafficLight1);
-
-                const trafficLight2 = createTrafficLight(
-                    j * blockSize + blockSize/2,
-                    i * blockSize + roadWidth/2 + 1
-                );
-                city.add(trafficLight2);
-            }
-
-            // Traffic lights for vertical roads
-            for (let j = -gridSize; j <= gridSize; j++) {
-                const trafficLight1 = createTrafficLight(
-                    i * blockSize - roadWidth/2 - 1,
-                    j * blockSize + blockSize/2,
-                    -Math.PI / 2
-                );
-                city.add(trafficLight1);
-
-                const trafficLight2 = createTrafficLight(
-                    i * blockSize + roadWidth/2 + 1,
-                    j * blockSize + blockSize/2,
-                    Math.PI / 2
-                );
-                city.add(trafficLight2);
-            }
-        }
+        curve.points = points;
+        
+        // Create branch geometry with tapering
+        const branchGeometry = new THREE.TubeGeometry(curve, segments, radius, 8, false);
+        const branch = new THREE.Mesh(branchGeometry, trunkMaterial);
+        parent.add(branch);
+        
+        return { branch, curve, points, segments };
     }
 
-    // Add street furniture
-    for (let x = -gridSize; x < gridSize; x++) {
-        for (let z = -gridSize; z < gridSize; z++) {
-            // Add benches along sidewalks
-            if (Math.random() < 0.3) {
-                const bench = createBench(
-                    x * blockSize + blockSize/2,
-                    z * blockSize - roadWidth/2 - sidewalkWidth/2,
-                    Math.PI
-                );
-                city.add(bench);
-            }
-            if (Math.random() < 0.3) {
-                const bench = createBench(
-                    x * blockSize + blockSize/2,
-                    z * blockSize + roadWidth/2 + sidewalkWidth/2,
-                    0
-                );
-                city.add(bench);
-            }
-
-            // Add trash bins
-            if (Math.random() < 0.2) {
-                const bin = createTrashBin(
-                    x * blockSize + blockSize/2 + (Math.random() - 0.5) * 10,
-                    z * blockSize - roadWidth/2 - sidewalkWidth/2 + (Math.random() - 0.5) * 2
-                );
-                city.add(bin);
-            }
-            if (Math.random() < 0.2) {
-                const bin = createTrashBin(
-                    x * blockSize + blockSize/2 + (Math.random() - 0.5) * 10,
-                    z * blockSize + roadWidth/2 + sidewalkWidth/2 + (Math.random() - 0.5) * 2
-                );
-                city.add(bin);
-            }
-        }
-    }
-
-    // Add buildings and trees
-    for (let x = -gridSize; x < gridSize; x++) {
-        for (let z = -gridSize; z < gridSize; z++) {
-            if (Math.random() < 0.7) {
-                // Determine building type
-                const rand = Math.random();
-                const buildingType = rand < 0.1 ? 'skyscraper' :
-                                   rand < 0.3 ? 'modern' :
-                                   rand < 0.6 ? 'office' : 'residential';
-                
-                const building = createBuilding(
-                    x * blockSize + blockSize/2,
-                    z * blockSize + blockSize/2,
-                    buildingType
-                );
-                city.add(building);
-            } else if (Math.random() < 0.3) {
-                // Add trees
-                const treeType = Math.random() < 0.3 ? 'pine' : 'deciduous';
-                const tree = createTree(
-                    x * blockSize + blockSize/2 + (Math.random() - 0.5) * 20,
-                    z * blockSize + blockSize/2 + (Math.random() - 0.5) * 20,
-                    treeType
-                );
-                city.add(tree);
-            }
-        }
-    }
-
-    return city;
-}
-
-// Create car
-function createCar() {
-    const car = new THREE.Group();
+    // Create main branches with natural curves
+    const numMainBranches = 4 + Math.floor(Math.random() * 3);
+    const mainBranches = [];
     
-    // Car body
-    const body = new THREE.Mesh(
-        new THREE.BoxGeometry(4, 2, 8),
-        new THREE.MeshStandardMaterial({ 
-            color: 0xff0000,
-            metalness: 0.8,
-            roughness: 0.2
-        })
-    );
-    body.position.y = 1;
-    body.castShadow = true;
-    car.add(body);
+    for (let i = 0; i < numMainBranches; i++) {
+        const angle = (i * Math.PI * 2) / numMainBranches + (Math.random() - 0.5) * Math.PI / 4;
+        const height = 3 + Math.random() * 2;
+        const length = 2 + Math.random() * 1.5;
+        const radius = 0.15 + Math.random() * 0.1;
+        mainBranches.push({ angle, height, length, radius });
+    }
 
-    // Car roof
-    const roof = new THREE.Mesh(
-        new THREE.BoxGeometry(3, 1.5, 4),
-        new THREE.MeshStandardMaterial({ 
-            color: 0x880000,
-            metalness: 0.8,
-            roughness: 0.2
-        })
-    );
-    roof.position.y = 2.75;
-    roof.position.z = -0.5;
-    roof.castShadow = true;
-    car.add(roof);
-
-    // Windows
-    const windowGeometry = new THREE.PlaneGeometry(3, 1.2);
-    const windowMaterial = new THREE.MeshStandardMaterial({
-        color: 0x88ccff,
-        metalness: 1,
-        roughness: 0,
-        transparent: true,
-        opacity: 0.7
+    mainBranches.forEach(({ angle, height, length, radius }) => {
+        const startPoint = new THREE.Vector3(
+            Math.sin(angle) * 0.5,
+            height,
+            Math.cos(angle) * 0.5
+        );
+        const direction = new THREE.Vector3(
+            Math.sin(angle),
+            0.2 + Math.random() * 0.2,
+            Math.cos(angle)
+        ).normalize();
+        
+        const branchResult = createBranch(startPoint, direction, length, radius, treeGroup, true);
+        
+        if (branchResult) {
+            const { branch, curve, points, segments } = branchResult;
+            
+            // Add smaller branches with natural distribution
+            const numSubBranches = 2 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < numSubBranches; i++) {
+                const t = 0.3 + i * 0.3;
+                const pointIndex = Math.floor(t * segments);
+                if (pointIndex < points.length) {
+                    const branchPoint = points[pointIndex];
+                    const subAngle = angle + (Math.random() - 0.5) * Math.PI / 2;
+                    const subDirection = new THREE.Vector3(
+                        Math.sin(subAngle),
+                        0.3 + Math.random() * 0.2,
+                        Math.cos(subAngle)
+                    ).normalize();
+                    
+                    createBranch(branchPoint, subDirection, length * 0.6, radius * 0.6, treeGroup);
+                }
+            }
+        }
     });
 
-    // Front window
-    const frontWindow = new THREE.Mesh(windowGeometry, windowMaterial);
-    frontWindow.position.set(0, 2.5, 3);
-    car.add(frontWindow);
+    // Create leaf clusters with more natural distribution
+    function createLeafCluster(position, size, color) {
+        const clusterGroup = new THREE.Group();
+        clusterGroup.position.copy(position);
 
-    // Back window
-    const backWindow = new THREE.Mesh(windowGeometry, windowMaterial);
-    backWindow.position.set(0, 2.5, -3);
-    backWindow.rotation.y = Math.PI;
-    car.add(backWindow);
+        // Create multiple leaf layers for depth
+        const leafLayers = 4;
+        for (let i = 0; i < leafLayers; i++) {
+            const layerSize = size * (1 - i * 0.15);
+            const leafGeometry = new THREE.ConeGeometry(layerSize, layerSize * 1.5, 8);
+            const leafMaterial = new THREE.MeshStandardMaterial({
+                map: leafTexture,
+                normalMap: leafNormalMap,
+                color: color,
+                roughness: 0.8,
+                metalness: 0.2,
+                flatShading: true,
+                normalScale: new THREE.Vector2(0.5, 0.5),
+                transparent: true,
+                opacity: 0.9,
+                alphaTest: 0.5
+            });
+            
+            const leafLayer = new THREE.Mesh(leafGeometry, leafMaterial);
+            leafLayer.position.y = i * 0.3;
+            leafLayer.rotation.y = (i * Math.PI) / 4;
+            clusterGroup.add(leafLayer);
+        }
 
-    // Wheels
-    const wheelGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.5, 32);
-    const wheelMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0x333333,
-        roughness: 0.9
-    });
-    
-    const wheelPositions = [
-        { x: -2, y: 0.8, z: 2.5 },
-        { x: 2, y: 0.8, z: 2.5 },
-        { x: -2, y: 0.8, z: -2.5 },
-        { x: 2, y: 0.8, z: -2.5 }
+        return clusterGroup;
+    }
+
+    // Create foliage with multiple clusters and natural variation
+    const leafColors = [
+        0x2d5a27, // Dark green
+        0x1e4020, // Forest green
+        0x3d6a37, // Medium green
+        0x4a7a42  // Light green
     ];
 
-    wheelPositions.forEach(pos => {
-        const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-        wheel.position.set(pos.x, pos.y, pos.z);
-        wheel.rotation.z = Math.PI / 2;
-        wheel.castShadow = true;
-        car.add(wheel);
+    const leafSizes = [3.5, 3, 2.5, 2];
+    const leafHeights = [7, 6.5, 6, 5.5];
+
+    // Create main foliage clusters with natural distribution
+    leafColors.forEach((color, i) => {
+        const mainCluster = createLeafCluster(
+            new THREE.Vector3(0, leafHeights[i], 0),
+            leafSizes[i],
+            color
+        );
+        treeGroup.add(mainCluster);
+
+        // Add smaller clusters around main cluster with natural variation
+        const numClusters = 4 + Math.floor(Math.random() * 3);
+        for (let j = 0; j < numClusters; j++) {
+            const angle = (j * Math.PI * 2) / numClusters + (Math.random() - 0.5) * Math.PI / 4;
+            const distance = leafSizes[i] * (0.5 + Math.random() * 0.3);
+            const offset = new THREE.Vector3(
+                Math.sin(angle) * distance,
+                (Math.random() - 0.5) * 0.5,
+                Math.cos(angle) * distance
+            );
+            const smallCluster = createLeafCluster(
+                new THREE.Vector3(0, leafHeights[i], 0).add(offset),
+                leafSizes[i] * (0.6 + Math.random() * 0.2),
+                color
+            );
+            treeGroup.add(smallCluster);
+        }
     });
 
-    return car;
+    // Add ground foliage with proper material
+    const groundFoliageGeometry = new THREE.CircleGeometry(2, 8);
+    const groundFoliageMaterial = new THREE.MeshStandardMaterial({
+        map: groundTexture,
+        color: 0x2d5a27,
+        roughness: 0.9,
+        metalness: 0.1,
+        side: THREE.DoubleSide
+    });
+    const groundFoliage = new THREE.Mesh(groundFoliageGeometry, groundFoliageMaterial);
+    groundFoliage.rotation.x = -Math.PI / 2;
+    groundFoliage.position.y = 0.1;
+    groundFoliage.receiveShadow = true;
+    treeGroup.add(groundFoliage);
+
+    // Add some random small rocks with proper material
+    for (let i = 0; i < 5; i++) {
+        const rockGeometry = new THREE.DodecahedronGeometry(0.2 + Math.random() * 0.3, 0);
+        const rockMaterial = new THREE.MeshStandardMaterial({
+            color: 0x666666,
+            roughness: 0.9,
+            metalness: 0.1,
+            normalScale: new THREE.Vector2(0.5, 0.5)
+        });
+        const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+        const angle = (i * Math.PI * 2) / 5;
+        rock.position.set(
+            Math.sin(angle) * 2,
+            0.1,
+            Math.cos(angle) * 2
+        );
+        rock.rotation.set(
+            Math.random() * Math.PI,
+            Math.random() * Math.PI,
+            Math.random() * Math.PI
+        );
+        rock.castShadow = true;
+        treeGroup.add(rock);
+    }
+
+    scene.add(treeGroup);
+    return treeGroup;
 }
 
-// Initialize city and car
-const city = createCity();
-scene.add(city);
-
-const car = createCar();
-car.position.set(0, 0.4, 0);
-scene.add(car);
-
-// Simple car controls
-const carControls = {
-    speed: 0,
-    maxSpeed: 0.5,
-    acceleration: 0.02,  // Increased for more responsive acceleration
-    deceleration: 0.01,  // Increased for more responsive deceleration
-    turnSpeed: 0.03,
-    bounceBack: 0.2
+// Create buildings in a larger grid
+const buildingGrid = {
+    minX: -3,
+    maxX: 3,
+    minZ: -3,
+    maxZ: 3
 };
 
-// Get all obstacles for collision detection
-const obstacles = [];
-city.traverse((object) => {
-    if (object.isMesh && object !== ground) {
-        object.userData.type = object.parent?.name || 'unknown';
-        obstacles.push(object);
-    }
-});
+for (let i = buildingGrid.minX; i <= buildingGrid.maxX; i++) {
+    for (let j = buildingGrid.minZ; j <= buildingGrid.maxZ; j++) {
+        // Skip center area for main roads
+        if (Math.abs(i) <= 1 && Math.abs(j) <= 1) continue;
 
-// Car controls
-const keys = {};
-document.addEventListener('keydown', (e) => {
-    keys[e.key.toLowerCase()] = true;
-    // Log key press for debugging
-    console.log('Key pressed:', e.key.toLowerCase());
-});
-document.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
-
-// Check for collisions
-function checkCollision(newPosition) {
-    const carBox = new THREE.Box3().setFromCenterAndSize(
-        newPosition,
-        new THREE.Vector3(4, 2, 8)
-    );
-
-    for (const obstacle of obstacles) {
-        const obstacleBox = new THREE.Box3().setFromObject(obstacle);
-        if (carBox.intersectsBox(obstacleBox)) {
-            console.log('Collision with:', obstacle.userData.type);
-            return true;
+        const x = i * (blockSize + roadWidth);
+        const z = j * (blockSize + roadWidth);
+        
+        // Add multiple buildings per block
+        const buildingsPerBlock = 2 + Math.floor(Math.random() * 3);
+        for (let k = 0; k < buildingsPerBlock; k++) {
+            const offsetX = (Math.random() - 0.5) * blockSize * 0.8;
+            const offsetZ = (Math.random() - 0.5) * blockSize * 0.8;
+            
+            const width = blockSize * (0.3 + Math.random() * 0.4);
+            const depth = blockSize * (0.3 + Math.random() * 0.4);
+            const height = 20 + Math.random() * 40;
+            
+            createBuilding(x + offsetX, z + offsetZ, width, depth, height);
         }
     }
-
-    const cityBoundary = 250;
-    if (Math.abs(newPosition.x) > cityBoundary || Math.abs(newPosition.z) > cityBoundary) {
-        console.log('Collision with city boundary');
-        return true;
-    }
-
-    return false;
 }
+
+// Add traffic lights at all major intersections
+const intersections = [];
+for (let i = -3; i <= 3; i++) {
+    for (let j = -3; j <= 3; j++) {
+        if (Math.abs(i) <= 1 && Math.abs(j) <= 1) continue;
+        intersections.push({
+            x: i * (blockSize + roadWidth),
+            z: j * (blockSize + roadWidth)
+        });
+    }
+}
+
+intersections.forEach(intersection => {
+    createTrafficLight(intersection.x + roadWidth/2 + 2, intersection.z, 0);
+    createTrafficLight(intersection.x - roadWidth/2 - 2, intersection.z, Math.PI);
+    createTrafficLight(intersection.x, intersection.z + roadWidth/2 + 2, Math.PI/2);
+    createTrafficLight(intersection.x, intersection.z - roadWidth/2 - 2, -Math.PI/2);
+});
+
+// Add more trees throughout the city
+for (let i = buildingGrid.minX; i <= buildingGrid.maxX; i++) {
+    for (let j = buildingGrid.minZ; j <= buildingGrid.maxZ; j++) {
+        if (Math.random() > 0.7) {
+            const x = i * (blockSize + roadWidth) + (Math.random() - 0.5) * blockSize;
+            const z = j * (blockSize + roadWidth) + (Math.random() - 0.5) * blockSize;
+            createTree(x, z);
+        }
+    }
+}
+
+// Update grid helper size
+const gridHelper = new THREE.GridHelper(groundSize, 40);
+scene.add(gridHelper);
+
+// Update camera position for better view of larger city
+camera.position.set(100, 100, 100);
+camera.lookAt(0, 0, 0);
+
+// Create car function
+function createCar(x, z) {
+    const carGroup = new THREE.Group();
+    carGroup.position.set(x, 0, z);
+
+    // Create environment map for better reflections
+    const envMap = new THREE.CubeTextureLoader().load([
+        'https://threejs.org/examples/textures/cube/Park2/posx.jpg',
+        'https://threejs.org/examples/textures/cube/Park2/negx.jpg',
+        'https://threejs.org/examples/textures/cube/Park2/posy.jpg',
+        'https://threejs.org/examples/textures/cube/Park2/negy.jpg',
+        'https://threejs.org/examples/textures/cube/Park2/posz.jpg',
+        'https://threejs.org/examples/textures/cube/Park2/negz.jpg'
+    ]);
+    scene.environment = envMap;
+
+    // Car materials
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+        color: 0x0066cc,
+        roughness: 0.05,
+        metalness: 0.95,
+        envMap: envMap,
+        envMapIntensity: 1.2,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1
+    });
+    const chromeMaterial = new THREE.MeshStandardMaterial({
+        color: 0xcccccc,
+        roughness: 0.1,
+        metalness: 0.9,
+        envMap: envMap,
+        envMapIntensity: 1.0
+    });
+    const glassMaterial = new THREE.MeshStandardMaterial({
+        color: 0x88ccff,
+        roughness: 0.05,
+        metalness: 0.9,
+        transparent: true,
+        opacity: 0.7,
+        envMap: envMap,
+        envMapIntensity: 1.5,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1
+    });
+    const blackMaterial = new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        roughness: 0.7,
+        metalness: 0.3,
+        envMap: envMap,
+        envMapIntensity: 0.3
+    });
+
+    // Car body
+    const bodyWidth = 6;
+    const bodyLength = 12;
+    const bodyHeight = 2;
+    const body = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyLength),
+        bodyMaterial
+    );
+    body.position.y = bodyHeight / 2;
+    carGroup.add(body);
+
+    // Roof
+    const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyWidth - 0.5, 1.5, bodyLength * 0.4),
+        bodyMaterial
+    );
+    roof.position.set(0, bodyHeight + 0.75, -0.5);
+    carGroup.add(roof);
+
+    // Hood
+    const hood = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyWidth - 0.5, 0.2, bodyLength * 0.25),
+        bodyMaterial
+    );
+    hood.position.set(0, bodyHeight/2 + 0.1, bodyLength/2 - 1.5);
+    carGroup.add(hood);
+
+    // Trunk
+    const trunk = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyWidth - 0.5, 0.2, bodyLength * 0.25),
+        bodyMaterial
+    );
+    trunk.position.set(0, bodyHeight/2 + 0.1, -bodyLength/2 + 1.5);
+    carGroup.add(trunk);
+
+    // Front windshield
+    const frontWindshield = new THREE.Mesh(
+        new THREE.PlaneGeometry(bodyWidth - 1, 1.8),
+        glassMaterial
+    );
+    frontWindshield.position.set(0, bodyHeight + 0.9, bodyLength/2 - 1);
+    frontWindshield.rotation.x = Math.PI / 6;
+    carGroup.add(frontWindshield);
+
+    // Rear windshield
+    const rearWindshield = new THREE.Mesh(
+        new THREE.PlaneGeometry(bodyWidth - 1, 1.8),
+        glassMaterial
+    );
+    rearWindshield.position.set(0, bodyHeight + 0.9, -bodyLength/2 + 1);
+    rearWindshield.rotation.x = -Math.PI / 6;
+    carGroup.add(rearWindshield);
+
+    // Side windows
+    const sideWindowGeometry = new THREE.PlaneGeometry(bodyLength * 0.4, 1.5);
+    const leftWindow = new THREE.Mesh(sideWindowGeometry, glassMaterial);
+    leftWindow.position.set(-bodyWidth/2 - 0.01, bodyHeight + 0.75, -0.5);
+    leftWindow.rotation.y = Math.PI / 2;
+    carGroup.add(leftWindow);
+    const rightWindow = leftWindow.clone();
+    rightWindow.position.set(bodyWidth/2 + 0.01, bodyHeight + 0.75, -0.5);
+    rightWindow.rotation.y = -Math.PI / 2;
+    carGroup.add(rightWindow);
+
+    // Bumpers
+    const frontBumper = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyWidth, 0.8, 0.6),
+        blackMaterial
+    );
+    frontBumper.position.set(0, 0.4, bodyLength/2 + 0.3);
+    carGroup.add(frontBumper);
+    const rearBumper = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyWidth, 0.8, 0.6),
+        blackMaterial
+    );
+    rearBumper.position.set(0, 0.4, -bodyLength/2 - 0.3);
+    carGroup.add(rearBumper);
+
+    // Grille
+    const grille = new THREE.Mesh(
+        new THREE.BoxGeometry(3, 1.2, 0.1),
+        blackMaterial
+    );
+    grille.position.set(0, bodyHeight/2 + 0.6, bodyLength/2 + 0.05);
+    carGroup.add(grille);
+
+    // Headlights
+    const headlightGeometry = new THREE.CircleGeometry(0.45, 32);
+    const headlightMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.5,
+        roughness: 0.05,
+        metalness: 0.9,
+        envMap: envMap,
+        envMapIntensity: 1.0,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1
+    });
+    const leftHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+    leftHeadlight.position.set(-1.5, bodyHeight/2 + 0.6, bodyLength/2 + 0.05);
+    carGroup.add(leftHeadlight);
+    const rightHeadlight = leftHeadlight.clone();
+    rightHeadlight.position.set(1.5, bodyHeight/2 + 0.6, bodyLength/2 + 0.05);
+    carGroup.add(rightHeadlight);
+
+    // Taillights
+    const taillightGeometry = new THREE.CircleGeometry(0.45, 32);
+    const taillightMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff0000,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.5,
+        roughness: 0.05,
+        metalness: 0.9,
+        envMap: envMap,
+        envMapIntensity: 1.0,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1
+    });
+    const leftTaillight = new THREE.Mesh(taillightGeometry, taillightMaterial);
+    leftTaillight.position.set(-1.5, bodyHeight/2 + 0.6, -bodyLength/2 - 0.05);
+    carGroup.add(leftTaillight);
+    const rightTaillight = leftTaillight.clone();
+    rightTaillight.position.set(1.5, bodyHeight/2 + 0.6, -bodyLength/2 - 0.05);
+    carGroup.add(rightTaillight);
+
+    // Wheels
+    const wheelGeometry = new THREE.CylinderGeometry(0.9, 0.9, 0.6, 32);
+    wheelGeometry.rotateZ(Math.PI / 2);
+    const wheelRimGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.6, 32);
+    wheelRimGeometry.rotateZ(Math.PI / 2);
+    function createWheel(x, z) {
+        const wheelGroup = new THREE.Group();
+        const tire = new THREE.Mesh(wheelGeometry, blackMaterial);
+        wheelGroup.add(tire);
+        const rim = new THREE.Mesh(wheelRimGeometry, chromeMaterial);
+        wheelGroup.add(rim);
+        for (let i = 0; i < 5; i++) {
+            const spokeGeometry = new THREE.BoxGeometry(0.1, 0.9, 0.05);
+            const spoke = new THREE.Mesh(spokeGeometry, chromeMaterial);
+            spoke.rotation.z = (i * Math.PI * 2) / 5;
+            wheelGroup.add(spoke);
+        }
+        wheelGroup.position.set(x, 0.9, z);
+        wheelGroup.castShadow = true;
+        return wheelGroup;
+    }
+    carGroup.add(createWheel(-bodyWidth/2 - 0.3, bodyLength/4));
+    carGroup.add(createWheel(bodyWidth/2 + 0.3, bodyLength/4));
+    carGroup.add(createWheel(-bodyWidth/2 - 0.3, -bodyLength/4));
+    carGroup.add(createWheel(bodyWidth/2 + 0.3, -bodyLength/4));
+
+    // Side mirrors
+    const sideMirrorGeometry = new THREE.BoxGeometry(1.2, 0.6, 0.3);
+    const leftMirror = new THREE.Mesh(sideMirrorGeometry, bodyMaterial);
+    leftMirror.position.set(-bodyWidth/2 - 0.6, bodyHeight + 0.3, bodyLength/4);
+    carGroup.add(leftMirror);
+    const rightMirror = leftMirror.clone();
+    rightMirror.position.set(bodyWidth/2 + 0.6, bodyHeight + 0.3, bodyLength/4);
+    carGroup.add(rightMirror);
+    const sideMirrorGlassGeometry = new THREE.PlaneGeometry(1, 0.5);
+    const leftMirrorGlass = new THREE.Mesh(sideMirrorGlassGeometry, glassMaterial);
+    leftMirrorGlass.position.set(-bodyWidth/2 - 0.75, bodyHeight + 0.3, bodyLength/4);
+    leftMirrorGlass.rotation.y = Math.PI / 2;
+    carGroup.add(leftMirrorGlass);
+    const rightMirrorGlass = leftMirrorGlass.clone();
+    rightMirrorGlass.position.set(bodyWidth/2 + 0.75, bodyHeight + 0.3, bodyLength/4);
+    rightMirrorGlass.rotation.y = -Math.PI / 2;
+    carGroup.add(rightMirrorGlass);
+
+    // Four doors with handles, panel lines, and windows
+    const doorMaterial = bodyMaterial;
+    const doorHandleMaterial = chromeMaterial;
+    const doorPanelLineMaterial = new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        roughness: 0.5,
+        metalness: 0.2,
+        envMap: envMap,
+        envMapIntensity: 0.3
+    });
+    // Front left door
+    const frontLeftDoorGeometry = new THREE.BoxGeometry(0.2, bodyHeight - 0.2, bodyLength * 0.25);
+    const frontLeftDoor = new THREE.Mesh(frontLeftDoorGeometry, doorMaterial);
+    frontLeftDoor.position.set(-bodyWidth/2 - 0.1, bodyHeight/2, bodyLength/4);
+    carGroup.add(frontLeftDoor);
+    // Front right door
+    const frontRightDoor = frontLeftDoor.clone();
+    frontRightDoor.position.set(bodyWidth/2 + 0.1, bodyHeight/2, bodyLength/4);
+    carGroup.add(frontRightDoor);
+    // Rear left door
+    const rearLeftDoorGeometry = new THREE.BoxGeometry(0.2, bodyHeight - 0.2, bodyLength * 0.25);
+    const rearLeftDoor = new THREE.Mesh(rearLeftDoorGeometry, doorMaterial);
+    rearLeftDoor.position.set(-bodyWidth/2 - 0.1, bodyHeight/2, -bodyLength/4);
+    carGroup.add(rearLeftDoor);
+    // Rear right door
+    const rearRightDoor = rearLeftDoor.clone();
+    rearRightDoor.position.set(bodyWidth/2 + 0.1, bodyHeight/2, -bodyLength/4);
+    carGroup.add(rearRightDoor);
+    // Door handles
+    function createDoorHandle(x, z) {
+        const handleGroup = new THREE.Group();
+        const handleBodyGeometry = new THREE.BoxGeometry(0.4, 0.1, 0.05);
+        const handleBody = new THREE.Mesh(handleBodyGeometry, doorHandleMaterial);
+        handleBody.position.set(0, 0, 0.05);
+        handleGroup.add(handleBody);
+        const handleGripGeometry = new THREE.BoxGeometry(0.3, 0.05, 0.1);
+        const handleGrip = new THREE.Mesh(handleGripGeometry, doorHandleMaterial);
+        handleGrip.position.set(0, 0, 0.1);
+        handleGroup.add(handleGrip);
+        const handleMountGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.05);
+        const handleMount = new THREE.Mesh(handleMountGeometry, doorHandleMaterial);
+        handleMount.position.set(0, 0, 0);
+        handleGroup.add(handleMount);
+        handleGroup.position.set(x, bodyHeight/2, z);
+        return handleGroup;
+    }
+    carGroup.add(createDoorHandle(-bodyWidth/2 - 0.2, bodyLength/4));
+    carGroup.add(createDoorHandle(bodyWidth/2 + 0.2, bodyLength/4));
+    carGroup.add(createDoorHandle(-bodyWidth/2 - 0.2, -bodyLength/4));
+    carGroup.add(createDoorHandle(bodyWidth/2 + 0.2, -bodyLength/4));
+    // Door panel lines
+    function createDoorPanelLine(x, z) {
+        const panelLineGeometry = new THREE.BoxGeometry(0.02, bodyHeight - 0.2, bodyLength * 0.25);
+        const panelLine = new THREE.Mesh(panelLineGeometry, doorPanelLineMaterial);
+        panelLine.position.set(x, bodyHeight/2, z);
+        return panelLine;
+    }
+    carGroup.add(createDoorPanelLine(-bodyWidth/2 - 0.11, bodyLength/4));
+    carGroup.add(createDoorPanelLine(bodyWidth/2 + 0.11, bodyLength/4));
+    carGroup.add(createDoorPanelLine(-bodyWidth/2 - 0.11, -bodyLength/4));
+    carGroup.add(createDoorPanelLine(bodyWidth/2 + 0.11, -bodyLength/4));
+    // Door windows
+    function createDoorWindow(x, z) {
+        const windowGeometry = new THREE.PlaneGeometry(bodyLength * 0.2, bodyHeight * 0.6);
+        const window = new THREE.Mesh(windowGeometry, glassMaterial);
+        window.position.set(x, bodyHeight/2 + 0.2, z);
+        window.rotation.y = x < 0 ? Math.PI/2 : -Math.PI/2;
+        return window;
+    }
+    carGroup.add(createDoorWindow(-bodyWidth/2 - 0.15, bodyLength/4));
+    carGroup.add(createDoorWindow(bodyWidth/2 + 0.15, bodyLength/4));
+    carGroup.add(createDoorWindow(-bodyWidth/2 - 0.15, -bodyLength/4));
+    carGroup.add(createDoorWindow(bodyWidth/2 + 0.15, -bodyLength/4));
+
+    // Interior (dashboard, seats, etc.)
+    const interiorMaterial = new THREE.MeshStandardMaterial({
+        color: 0x222222,
+        roughness: 0.7,
+        metalness: 0.3,
+        envMap: envMap,
+        envMapIntensity: 0.3
+    });
+    const seatMaterial = new THREE.MeshStandardMaterial({
+        color: 0x333333,
+        roughness: 0.8,
+        metalness: 0.2,
+        envMap: envMap,
+        envMapIntensity: 0.2
+    });
+    const dashboardMaterial = new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        roughness: 0.5,
+        metalness: 0.5,
+        envMap: envMap,
+        envMapIntensity: 0.4
+    });
+    // Dashboard
+    const dashboard = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyWidth - 1, 0.8, 1.5),
+        dashboardMaterial
+    );
+    dashboard.position.set(0, bodyHeight/2 + 0.4, bodyLength/2 - 1.5);
+    carGroup.add(dashboard);
+    // Steering wheel
+    const steeringWheelGroup = new THREE.Group();
+    const steeringWheelRimGeometry = new THREE.TorusGeometry(0.4, 0.05, 16, 32);
+    const rim = new THREE.Mesh(steeringWheelRimGeometry, interiorMaterial);
+    rim.rotation.x = Math.PI / 2;
+    steeringWheelGroup.add(rim);
+    const spokeGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.4);
+    for (let i = 0; i < 3; i++) {
+        const spoke = new THREE.Mesh(spokeGeometry, interiorMaterial);
+        spoke.rotation.z = (i * Math.PI * 2) / 3;
+        steeringWheelGroup.add(spoke);
+    }
+    steeringWheelGroup.position.set(-1.2, bodyHeight/2 + 0.6, bodyLength/2 - 1.5);
+    steeringWheelGroup.rotation.y = Math.PI / 6;
+    carGroup.add(steeringWheelGroup);
+    // Seats
+    function createSeat(x, z, isDriver = false) {
+        const seatGroup = new THREE.Group();
+        const base = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 1.2), seatMaterial);
+        base.position.y = 0.15;
+        seatGroup.add(base);
+        const back = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 0.3), seatMaterial);
+        back.position.set(0, 0.9, -0.45);
+        back.rotation.x = Math.PI / 6;
+        seatGroup.add(back);
+        const headrest = new THREE.Mesh(new THREE.BoxGeometry(1, 0.3, 0.2), seatMaterial);
+        headrest.position.set(0, 1.5, -0.3);
+        seatGroup.add(headrest);
+        if (isDriver) {
+            const adjustment = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), interiorMaterial);
+            adjustment.position.set(0.5, 0.2, 0.5);
+            seatGroup.add(adjustment);
+        }
+        seatGroup.position.set(x, 0.3, z);
+        return seatGroup;
+    }
+    carGroup.add(createSeat(-1.2, bodyLength/2 - 2.5, true));
+    carGroup.add(createSeat(1.2, bodyLength/2 - 2.5));
+    carGroup.add(createSeat(-1.2, bodyLength/2 - 4.5));
+    carGroup.add(createSeat(1.2, bodyLength/2 - 4.5));
+    // Center console
+    const console = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 2), dashboardMaterial);
+    console.position.set(0, bodyHeight/2 + 0.2, bodyLength/2 - 3);
+    carGroup.add(console);
+    // Gear shift
+    const gearShift = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3), interiorMaterial);
+    gearShift.position.set(0, bodyHeight/2 + 0.5, bodyLength/2 - 3);
+    carGroup.add(gearShift);
+    // Gear shift knob
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), interiorMaterial);
+    knob.position.set(0, bodyHeight/2 + 0.65, bodyLength/2 - 3);
+    carGroup.add(knob);
+    // Rear view mirror
+    const rearMirror = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.2), interiorMaterial);
+    rearMirror.position.set(0, bodyHeight + 0.4, bodyLength/2 - 1.2);
+    carGroup.add(rearMirror);
+    const rearMirrorGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.1), glassMaterial);
+    rearMirrorGlass.position.set(0, bodyHeight + 0.4, bodyLength/2 - 1.1);
+    rearMirrorGlass.rotation.x = Math.PI / 2;
+    carGroup.add(rearMirrorGlass);
+    // Floor mats
+    const floorMat = new THREE.Mesh(new THREE.PlaneGeometry(3, 4), new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        roughness: 0.9,
+        metalness: 0.1,
+        envMap: envMap,
+        envMapIntensity: 0.2
+    }));
+    floorMat.rotation.x = -Math.PI / 2;
+    floorMat.position.set(0, 0.01, bodyLength/2 - 3);
+    carGroup.add(floorMat);
+
+    // Add car to scene
+    scene.add(carGroup);
+    return carGroup;
+}
+
+// Create a car in the city
+const car = createCar(0, 0);
 
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
-
-    // Handle car movement with more responsive controls
-    if (keys['w'] || keys['arrowup']) {
-        carControls.speed = Math.min(carControls.speed + carControls.acceleration, carControls.maxSpeed);
-        console.log('Moving forward, speed:', carControls.speed);
-    } else if (keys['s'] || keys['arrowdown']) {
-        carControls.speed = Math.max(carControls.speed - carControls.acceleration, -carControls.maxSpeed);
-        console.log('Moving backward, speed:', carControls.speed);
-    } else {
-        // Gradual deceleration when no keys are pressed
-        if (carControls.speed > 0) {
-            carControls.speed = Math.max(carControls.speed - carControls.deceleration, 0);
-        } else if (carControls.speed < 0) {
-            carControls.speed = Math.min(carControls.speed + carControls.deceleration, 0);
-        }
-    }
-
-    // Always allow turning
-    if (keys['a'] || keys['arrowleft']) {
-        car.rotation.y += carControls.turnSpeed;
-    }
-    if (keys['d'] || keys['arrowright']) {
-        car.rotation.y -= carControls.turnSpeed;
-    }
-
-    // Calculate new position
-    const newPosition = car.position.clone();
-    newPosition.x += Math.sin(car.rotation.y) * carControls.speed;
-    newPosition.z += Math.cos(car.rotation.y) * carControls.speed;
-
-    // Check for collisions before updating position
-    if (checkCollision(newPosition)) {
-        carControls.speed = -carControls.speed * carControls.bounceBack;
-    } else {
-        car.position.copy(newPosition);
-    }
-
-    // Update camera position
-    const cameraOffset = new THREE.Vector3(
-        Math.sin(car.rotation.y) * 8,
-        5,
-        Math.cos(car.rotation.y) * 8
-    );
-    camera.position.lerp(
-        new THREE.Vector3(
-            car.position.x + cameraOffset.x,
-            car.position.y + cameraOffset.y,
-            car.position.z + cameraOffset.z
-        ),
-        0.1
-    );
-    camera.lookAt(car.position);
-
+    controls.update();
     renderer.render(scene, camera);
 }
 
