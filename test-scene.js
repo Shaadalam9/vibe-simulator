@@ -1,37 +1,119 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader';
+import osmtogeojson from 'osmtogeojson';
 
-// Create the scene
+// Scene dimensions
+const groundSize = 400; // Size of the ground plane
+const roadWidth = 15;
+const blockSize = 60;
+
+// Enhanced City Configuration
+const CITY_CONFIG = {
+    name: 'Amsterdam',
+    center: { lat: 52.3676, lng: 4.9041 },
+    radius: 1000,
+    zoom: 18,
+    // Google Maps 3D tiles configuration
+    tiles: {
+        baseUrl: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+        buildingUrl: 'https://mt1.google.com/vt/lyrs=3d&x={x}&y={y}&z={z}',
+        terrainUrl: 'https://mt1.google.com/vt/lyrs=t&x={x}&y={y}&z={z}'
+    }
+};
+
+// OpenStreetMap Configuration
+const OSM_CONFIG = {
+    baseUrl: 'https://overpass-api.de/api/interpreter',
+    tileUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+};
+
+// Texture Configuration
+const TEXTURE_CONFIG = {
+    // CC0 Textures from Polyhaven
+    brick: {
+        diffuse: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brick_wall_001/brick_wall_001_diff_1k.jpg',
+        normal: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brick_wall_001/brick_wall_001_nor_1k.jpg',
+        roughness: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/brick_wall_001/brick_wall_001_rough_1k.jpg'
+    },
+    roof: {
+        diffuse: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_01/roof_tiles_01_diff_1k.jpg',
+        normal: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_01/roof_tiles_01_nor_1k.jpg',
+        roughness: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_01/roof_tiles_01_rough_1k.jpg'
+    },
+    window: {
+        diffuse: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/glass_window_01/glass_window_01_diff_1k.jpg',
+        normal: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/glass_window_01/glass_window_01_nor_1k.jpg',
+        roughness: 'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/glass_window_01/glass_window_01_rough_1k.jpg'
+    },
+    // OpenAerialMap for ground texture
+    ground: {
+        satellite: OSM_CONFIG.tileUrl
+    }
+};
+
+// API Configuration
+const API_CONFIG = {
+    googleMaps: {
+        apiKey: 'YOUR_GOOGLE_MAPS_API_KEY', // Replace with your API key
+        staticUrl: 'https://maps.googleapis.com/maps/api/staticmap',
+        streetViewUrl: 'https://maps.googleapis.com/maps/api/streetview'
+    },
+    mapbox: {
+        accessToken: 'YOUR_MAPBOX_ACCESS_TOKEN', // Replace with your access token
+        terrainUrl: 'https://api.mapbox.com/v4/mapbox.mapbox-terrain-dem-v1/{z}/{x}/{y}.pngraw'
+    },
+    mapillary: {
+        clientId: 'YOUR_MAPILLARY_CLIENT_ID', // Replace with your client ID
+        apiUrl: 'https://graph.mapillary.com'
+    }
+};
+
+// Leiden coordinates
+const LEIDEN_CONFIG = {
+    center: { lat: 52.165, lng: 4.475 },
+    bbox: {
+        minLat: 52.16,
+        maxLat: 52.17,
+        minLng: 4.47,
+        maxLng: 4.48
+    }
+};
+
+// Scene setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.Fog(0x87CEEB, 100, 300);
+scene.background = new THREE.Color(0x87CEEB); // Light blue sky
 
-// Create the renderer
+// Camera setup
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(100, 100, 100);
+camera.lookAt(0, 0, 0);
+
+// Renderer setup
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
 document.body.appendChild(renderer.domElement);
 
-// Create the camera
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(50, 50, 50);
-camera.lookAt(0, 0, 0);
-
-// Add orbit controls
+// Controls setup
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
-// Enhanced lighting
+// Lighting setup
+// Ambient light
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
 scene.add(ambientLight);
 
+// Directional light (sun)
 const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(50, 100, 50);
+directionalLight.position.set(50, 200, 100);
 directionalLight.castShadow = true;
+
+// Configure shadow properties
 directionalLight.shadow.mapSize.width = 2048;
 directionalLight.shadow.mapSize.height = 2048;
 directionalLight.shadow.camera.near = 0.5;
@@ -42,983 +124,610 @@ directionalLight.shadow.camera.top = 100;
 directionalLight.shadow.camera.bottom = -100;
 scene.add(directionalLight);
 
-// Create ground with texture
-const groundTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg');
-groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
-groundTexture.repeat.set(25, 25);
-groundTexture.anisotropy = 16;
-
-// Create materials first
-const roadMaterial = new THREE.MeshStandardMaterial({
-    color: 0x333333,
-    roughness: 0.9,
-    metalness: 0.1
-});
-
-const sidewalkMaterial = new THREE.MeshStandardMaterial({
-    color: 0xcccccc,
+// Ground plane
+const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
+const groundMaterial = new THREE.MeshStandardMaterial({
+    color: 0x808080,
     roughness: 0.8,
-    metalness: 0.1
+    metalness: 0.2
 });
-
-const lineMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    roughness: 0.5,
-    metalness: 0.1
-});
-
-// Increase ground size
-const groundSize = 400;
-const roadWidth = 15;
-const blockSize = 60;
-
-// Update ground
-const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(groundSize, groundSize),
-    new THREE.MeshStandardMaterial({ 
-        map: groundTexture,
-        roughness: 0.8,
-        metalness: 0.2
-    })
-);
+const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Update road dimensions
-const roadLength = groundSize;
+// Create procedural materials as fallbacks
+const proceduralMaterials = {
+    brick: new THREE.MeshStandardMaterial({
+        color: 0xE8D0AA,
+        roughness: 0.7,
+        metalness: 0.3,
+        bumpScale: 0.1
+    }),
+    concrete: new THREE.MeshStandardMaterial({
+        color: 0xCCCCCC,
+        roughness: 0.8,
+        metalness: 0.2
+    }),
+    glass: new THREE.MeshPhysicalMaterial({
+        color: 0x88CCFF,
+        roughness: 0.1,
+        metalness: 0.9,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        transparent: true,
+        opacity: 0.7
+    })
+};
 
-// Create main roads
-const mainRoads = [
-    { x: 0, z: 0, width: roadWidth, length: roadLength, rotation: 0 },
-    { x: 0, z: 0, width: roadLength, length: roadWidth, rotation: Math.PI / 2 },
-    { x: -groundSize/4, z: 0, width: roadWidth, length: roadLength, rotation: 0 },
-    { x: groundSize/4, z: 0, width: roadWidth, length: roadLength, rotation: 0 },
-    { x: 0, z: -groundSize/4, width: roadLength, length: roadWidth, rotation: Math.PI / 2 },
-    { x: 0, z: groundSize/4, width: roadLength, length: roadWidth, rotation: Math.PI / 2 }
-];
-
-mainRoads.forEach(road => {
-    const roadMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(road.width, road.length),
-        roadMaterial
-    );
-    roadMesh.rotation.x = -Math.PI / 2;
-    roadMesh.position.set(road.x, 0.01, road.z);
-    roadMesh.rotation.z = road.rotation;
-    roadMesh.receiveShadow = true;
-    scene.add(roadMesh);
-
-    // Add sidewalks
-    const sidewalkMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(road.width + 4, road.length),
-        sidewalkMaterial
-    );
-    sidewalkMesh.rotation.x = -Math.PI / 2;
-    sidewalkMesh.position.set(road.x, 0.02, road.z);
-    sidewalkMesh.rotation.z = road.rotation;
-    sidewalkMesh.receiveShadow = true;
-    scene.add(sidewalkMesh);
-
-    // Add road markings
-    const centerLine = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.3, road.length),
-        lineMaterial
-    );
-    centerLine.rotation.x = -Math.PI / 2;
-    centerLine.position.set(road.x, 0.03, road.z);
-    centerLine.rotation.z = road.rotation;
-    scene.add(centerLine);
-});
-
-// Create sidewalks with texture
-const sidewalkTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/brick_bump.jpg');
-sidewalkTexture.wrapS = sidewalkTexture.wrapT = THREE.RepeatWrapping;
-sidewalkTexture.repeat.set(2, 2);
-
-// Create building with windows and texture
-function createBuilding(x, z, width, depth, height) {
-    const buildingTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/brick_diffuse.jpg');
-    buildingTexture.wrapS = buildingTexture.wrapT = THREE.RepeatWrapping;
-    buildingTexture.repeat.set(width/10, height/10);
-
-    const building = new THREE.Mesh(
-        new THREE.BoxGeometry(width, height, depth),
-        new THREE.MeshStandardMaterial({
-            map: buildingTexture,
-            roughness: 0.7,
-            metalness: 0.3
-        })
-    );
-    building.position.set(x, height / 2, z);
-    building.castShadow = true;
-    building.receiveShadow = true;
-    scene.add(building);
-
-    // Add windows
-    const windowMaterial = new THREE.MeshStandardMaterial({
-        color: 0x88ccff,
-        roughness: 0.2,
-        metalness: 0.8,
-        emissive: 0x88ccff,
-        emissiveIntensity: 0.2
-    });
-
-    const windowSize = 2;
-    const windowSpacing = 4;
-    const windowRows = Math.floor(height / windowSpacing);
-    const windowCols = Math.floor(width / windowSpacing);
-
-    // Add windows to all sides
-    for (let row = 0; row < windowRows; row++) {
-        for (let col = 0; col < windowCols; col++) {
-            if (Math.random() > 0.3) {
-                // Front windows
-                const window = new THREE.Mesh(
-                    new THREE.PlaneGeometry(windowSize, windowSize),
-                    windowMaterial
-                );
-                window.position.set(
-                    x - width/2 + col * windowSpacing + windowSpacing/2,
-                    row * windowSpacing + windowSpacing/2,
-                    z - depth/2 - 0.1
-                );
-                window.rotation.y = Math.PI;
-                scene.add(window);
-
-                // Back windows
-                const backWindow = window.clone();
-                backWindow.position.z = z + depth/2 + 0.1;
-                backWindow.rotation.y = 0;
-                scene.add(backWindow);
-
-                // Left side windows
-                const leftWindow = window.clone();
-                leftWindow.position.set(
-                    x - width/2 - 0.1,
-                    row * windowSpacing + windowSpacing/2,
-                    z - depth/2 + col * windowSpacing + windowSpacing/2
-                );
-                leftWindow.rotation.y = -Math.PI / 2;
-                scene.add(leftWindow);
-
-                // Right side windows
-                const rightWindow = window.clone();
-                rightWindow.position.set(
-                    x + width/2 + 0.1,
-                    row * windowSpacing + windowSpacing/2,
-                    z - depth/2 + col * windowSpacing + windowSpacing/2
-                );
-                rightWindow.rotation.y = Math.PI / 2;
-                scene.add(rightWindow);
-            }
-        }
+// Load building textures with fallbacks
+const buildingTextures = {
+    brick: {
+        color: loadTextureWithFallback('/textures/brick_diff.jpg', proceduralMaterials.brick),
+        normal: loadTextureWithFallback('/textures/brick_nor.jpg', proceduralMaterials.brick),
+        roughness: loadTextureWithFallback('/textures/brick_rough.jpg', proceduralMaterials.brick),
+        ao: loadTextureWithFallback('/textures/brick_ao.jpg', proceduralMaterials.brick)
+    },
+    concrete: {
+        color: loadTextureWithFallback('/textures/concrete_diff.jpg', proceduralMaterials.concrete),
+        normal: loadTextureWithFallback('/textures/concrete_nor.jpg', proceduralMaterials.concrete),
+        roughness: loadTextureWithFallback('/textures/concrete_rough.jpg', proceduralMaterials.concrete),
+        ao: loadTextureWithFallback('/textures/concrete_ao.jpg', proceduralMaterials.concrete)
+    },
+    glass: {
+        color: loadTextureWithFallback('/textures/glass_diff.jpg', proceduralMaterials.glass),
+        normal: loadTextureWithFallback('/textures/glass_nor.jpg', proceduralMaterials.glass),
+        roughness: loadTextureWithFallback('/textures/glass_rough.jpg', proceduralMaterials.glass),
+        ao: loadTextureWithFallback('/textures/glass_ao.jpg', proceduralMaterials.glass)
     }
+};
 
-    // Add roof details
-    if (Math.random() > 0.5) {
-        const roofGeometry = new THREE.BoxGeometry(width + 2, 2, depth + 2);
-        const roofMaterial = new THREE.MeshStandardMaterial({
-            color: 0x444444,
-            roughness: 0.8,
-            metalness: 0.2
-        });
-        const roof = new THREE.Mesh(roofGeometry, roofMaterial);
-        roof.position.set(x, height + 1, z);
-        roof.castShadow = true;
-        scene.add(roof);
+// Helper function to load textures with fallback
+function loadTextureWithFallback(path, fallbackMaterial) {
+    const textureLoader = new THREE.TextureLoader();
+    try {
+        const texture = textureLoader.load(path);
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(2, 2);
+        return texture;
+    } catch (error) {
+        console.warn(`Failed to load texture ${path}, using fallback material`);
+        return null;
     }
-
-    // Add entrance
-    const entranceWidth = 4;
-    const entranceHeight = 6;
-    const entrance = new THREE.Mesh(
-        new THREE.BoxGeometry(entranceWidth, entranceHeight, 0.5),
-        new THREE.MeshStandardMaterial({
-            color: 0x666666,
-            roughness: 0.5,
-            metalness: 0.8
-        })
-    );
-    entrance.position.set(
-        x - width/2 + entranceWidth/2,
-        entranceHeight/2,
-        z - depth/2 - 0.2
-    );
-    scene.add(entrance);
 }
 
-// Create traffic lights with more detail
-function createTrafficLight(x, z, rotation = 0) {
+// Load 3D models
+const modelLoader = new GLTFLoader();
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+modelLoader.setDRACOLoader(dracoLoader);
+
+// Model paths
+const MODELS = {
+    tree: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/SimpleSparseAccessor/glTF/SimpleSparseAccessor.gltf',
+    lampPost: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/SimpleMeshes/glTF/SimpleMeshes.gltf'
+};
+
+// Store loaded models
+let treeModel = null;
+let lampPostModel = null;
+
+// Load models
+Promise.all([
+    new Promise((resolve) => {
+        modelLoader.load(MODELS.tree, (gltf) => {
+            treeModel = gltf.scene;
+            resolve();
+        });
+    }),
+    new Promise((resolve) => {
+        modelLoader.load(MODELS.lampPost, (gltf) => {
+            lampPostModel = gltf.scene;
+            resolve();
+        });
+    })
+]).then(() => {
+    console.log('All models loaded');
+});
+
+// Fetch OpenStreetMap data
+async function fetchLeidenData() {
+    const query = `
+        [out:json];
+        (
+            way["building"](${LEIDEN_CONFIG.bbox.minLat},${LEIDEN_CONFIG.bbox.minLng},${LEIDEN_CONFIG.bbox.maxLat},${LEIDEN_CONFIG.bbox.maxLng});
+            way["highway"](${LEIDEN_CONFIG.bbox.minLat},${LEIDEN_CONFIG.bbox.minLng},${LEIDEN_CONFIG.bbox.maxLat},${LEIDEN_CONFIG.bbox.maxLng});
+        );
+        out body;
+        >;
+        out skel qt;
+    `;
+
+    try {
+        const response = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            body: query
+        });
+        const osmData = await response.json();
+        const geojsonData = osmtogeojson(osmData);
+        return geojsonData;
+    } catch (error) {
+        console.error('Error fetching Leiden data:', error);
+        return null;
+    }
+}
+
+// Convert coordinates to local space
+function convertCoordinates(lat, lng) {
+    const x = (lng - LEIDEN_CONFIG.center.lng) * 1000;
+    const z = (lat - LEIDEN_CONFIG.center.lat) * 1000;
+    return { x, z };
+}
+
+// Create buildings from GeoJSON
+function createBuildings(geojsonData) {
+    geojsonData.features.forEach(feature => {
+        if (feature.properties.building) {
+            const coordinates = feature.geometry.coordinates[0];
+            const points = coordinates.map(coord => convertCoordinates(coord[1], coord[0]));
+            
+            // Get building height from OSM tags
+            let height = 10; // Default height in meters
+            if (feature.properties.height) {
+                height = parseFloat(feature.properties.height);
+            } else if (feature.properties['building:levels']) {
+                height = parseFloat(feature.properties['building:levels']) * 3;
+            }
+
+            // Create shape for extrusion
+            const shape = new THREE.Shape();
+            points.forEach((point, index) => {
+                if (index === 0) {
+                    shape.moveTo(point.x, point.z);
+                } else {
+                    shape.lineTo(point.x, point.z);
+                }
+            });
+            shape.closePath();
+
+            // Create building geometry
+            const buildingGeometry = new THREE.ExtrudeGeometry(shape, {
+                steps: 1,
+                depth: height,
+                bevelEnabled: true,
+                bevelThickness: 0.5,
+                bevelSize: 0.5,
+                bevelSegments: 1
+            });
+
+            // Determine building material based on OSM tags
+            let materialType = 'brick'; // Default material
+            if (feature.properties['building:material']) {
+                const osmMaterial = feature.properties['building:material'].toLowerCase();
+                if (osmMaterial.includes('concrete')) {
+                    materialType = 'concrete';
+                } else if (osmMaterial.includes('glass')) {
+                    materialType = 'glass';
+                }
+            }
+
+            // Create building material with textures or fallback
+            const textures = buildingTextures[materialType];
+            let buildingMaterial;
+            
+            if (textures.color && textures.normal && textures.roughness && textures.ao) {
+                buildingMaterial = new THREE.MeshPhysicalMaterial({
+                    map: textures.color,
+                    normalMap: textures.normal,
+                    roughnessMap: textures.roughness,
+                    aoMap: textures.ao,
+                    roughness: materialType === 'glass' ? 0.1 : 0.7,
+                    metalness: materialType === 'glass' ? 0.9 : 0.2,
+                    clearcoat: materialType === 'glass' ? 1.0 : 0.0,
+                    clearcoatRoughness: materialType === 'glass' ? 0.1 : 0.5,
+                    transparent: materialType === 'glass',
+                    opacity: materialType === 'glass' ? 0.7 : 1.0
+                });
+            } else {
+                buildingMaterial = proceduralMaterials[materialType].clone();
+            }
+
+            const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            building.position.set(0, 0, 0);
+            building.rotation.x = -Math.PI / 2;
+            building.castShadow = true;
+            building.receiveShadow = true;
+            scene.add(building);
+
+            // Add windows if not a glass building
+            if (materialType !== 'glass') {
+                addWindowsToBuilding(building, points, height);
+            }
+        }
+    });
+}
+
+// Add windows to buildings
+function addWindowsToBuilding(building, points, height) {
+    // Calculate building bounds
+    let minX = Infinity, maxX = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    
+    points.forEach(point => {
+        minX = Math.min(minX, point.x);
+        maxX = Math.max(maxX, point.x);
+        minZ = Math.min(minZ, point.z);
+        maxZ = Math.max(maxZ, point.z);
+    });
+
+    const width = maxX - minX;
+    const depth = maxZ - minZ;
+    const perimeter = 2 * (width + depth);
+
+    // Calculate number of windows based on building size
+    const windowsPerFloor = Math.floor(perimeter / 4); // One window every 4 meters
+    const floors = Math.floor(height / 3); // One floor every 3 meters
+
+    // Load window texture
+    const windowTexture = textureLoader.load('https://ambientcg.com/get/Glass_01_1K-JPG.zip/Glass_01_1K-JPG_Color.jpg');
+    windowTexture.wrapS = windowTexture.wrapT = THREE.RepeatWrapping;
+    windowTexture.repeat.set(1, 1);
+
+    const windowMaterial = new THREE.MeshPhysicalMaterial({
+        map: windowTexture,
+        transparent: true,
+        opacity: 0.7,
+        roughness: 0.1,
+        metalness: 0.9,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1
+    });
+
+    const windowGeometry = new THREE.PlaneGeometry(1.5, 2);
+
+    // Add windows around the building
+    for (let floor = 0; floor < floors; floor++) {
+        for (let i = 0; i < windowsPerFloor; i++) {
+            const angle = (i / windowsPerFloor) * Math.PI * 2;
+            const radius = Math.max(width, depth) / 2;
+
+            const window = new THREE.Mesh(windowGeometry, windowMaterial);
+            window.position.set(
+                Math.cos(angle) * radius,
+                floor * 3 + 1.5, // Window height
+                Math.sin(angle) * radius
+            );
+            window.lookAt(0, window.position.y, 0);
+            window.rotateY(Math.PI / 2);
+            building.add(window);
+        }
+    }
+}
+
+// Create roads from GeoJSON
+function createRoads(geojsonData) {
+    // Load road textures
+    const textureLoader = new THREE.TextureLoader();
+    const asphaltTexture = textureLoader.load('https://ambientcg.com/get/Asphalt_01_1K-JPG.zip/Asphalt_01_1K-JPG_Color.jpg');
+    const asphaltNormalMap = textureLoader.load('https://ambientcg.com/get/Asphalt_01_1K-JPG.zip/Asphalt_01_1K-JPG_NormalGL.jpg');
+    const asphaltRoughnessMap = textureLoader.load('https://ambientcg.com/get/Asphalt_01_1K-JPG.zip/Asphalt_01_1K-JPG_Roughness.jpg');
+
+    // Configure texture repeat
+    const textureRepeat = 4;
+    asphaltTexture.wrapS = asphaltTexture.wrapT = THREE.RepeatWrapping;
+    asphaltNormalMap.wrapS = asphaltNormalMap.wrapT = THREE.RepeatWrapping;
+    asphaltRoughnessMap.wrapS = asphaltRoughnessMap.wrapT = THREE.RepeatWrapping;
+    asphaltTexture.repeat.set(textureRepeat, textureRepeat);
+    asphaltNormalMap.repeat.set(textureRepeat, textureRepeat);
+    asphaltRoughnessMap.repeat.set(textureRepeat, textureRepeat);
+
+    // Create road material
+    const roadMaterial = new THREE.MeshStandardMaterial({
+        map: asphaltTexture,
+        normalMap: asphaltNormalMap,
+        roughnessMap: asphaltRoughnessMap,
+        roughness: 0.8,
+        metalness: 0.2
+    });
+
+    // Create sidewalk material
+    const sidewalkMaterial = new THREE.MeshStandardMaterial({
+        color: 0xCCCCCC,
+        roughness: 0.9,
+        metalness: 0.1
+    });
+
+    geojsonData.features.forEach(feature => {
+        if (feature.properties.highway) {
+            const coordinates = feature.geometry.coordinates;
+            const points = coordinates.map(coord => convertCoordinates(coord[1], coord[0]));
+            
+            // Create road segments
+            for (let i = 0; i < points.length - 1; i++) {
+                const start = points[i];
+                const end = points[i + 1];
+                
+                // Calculate road segment
+                const length = Math.sqrt(
+                    Math.pow(end.x - start.x, 2) + 
+                    Math.pow(end.z - start.z, 2)
+                );
+                const angle = Math.atan2(end.z - start.z, end.x - start.x);
+
+                // Create road segment
+                const roadGeometry = new THREE.PlaneGeometry(length, roadWidth);
+                const road = new THREE.Mesh(roadGeometry, roadMaterial);
+                road.rotation.x = -Math.PI / 2;
+                road.rotation.z = -angle;
+                road.position.set(
+                    (start.x + end.x) / 2,
+                    0.01,
+                    (start.z + end.z) / 2
+                );
+                road.receiveShadow = true;
+                scene.add(road);
+
+                // Create sidewalks
+                const sidewalkWidth = 2;
+                const sidewalkHeight = 0.1;
+                
+                // Left sidewalk
+                const leftSidewalkGeometry = new THREE.BoxGeometry(length, sidewalkHeight, sidewalkWidth);
+                const leftSidewalk = new THREE.Mesh(leftSidewalkGeometry, sidewalkMaterial);
+                leftSidewalk.position.set(
+                    (start.x + end.x) / 2 - Math.sin(angle) * (roadWidth/2 + sidewalkWidth/2),
+                    sidewalkHeight/2,
+                    (start.z + end.z) / 2 + Math.cos(angle) * (roadWidth/2 + sidewalkWidth/2)
+                );
+                leftSidewalk.rotation.y = angle;
+                leftSidewalk.castShadow = true;
+                leftSidewalk.receiveShadow = true;
+                scene.add(leftSidewalk);
+
+                // Right sidewalk
+                const rightSidewalkGeometry = new THREE.BoxGeometry(length, sidewalkHeight, sidewalkWidth);
+                const rightSidewalk = new THREE.Mesh(rightSidewalkGeometry, sidewalkMaterial);
+                rightSidewalk.position.set(
+                    (start.x + end.x) / 2 + Math.sin(angle) * (roadWidth/2 + sidewalkWidth/2),
+                    sidewalkHeight/2,
+                    (start.z + end.z) / 2 - Math.cos(angle) * (roadWidth/2 + sidewalkWidth/2)
+                );
+                rightSidewalk.rotation.y = angle;
+                rightSidewalk.castShadow = true;
+                rightSidewalk.receiveShadow = true;
+                scene.add(rightSidewalk);
+
+                // Add road markings
+                addRoadMarkings(road, start, end, length, angle);
+
+                // Add street furniture
+                addStreetFurniture(road, start, end, length, angle);
+            }
+        }
+    });
+}
+
+// Add road markings
+function addRoadMarkings(road, start, end, length, angle) {
+    const markingGeometry = new THREE.PlaneGeometry(0.3, 2);
+    const markingMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFFFFF,
+        roughness: 0.8,
+        metalness: 0.2
+    });
+
+    // Add center line markings
+    const markings = Math.floor(length / 4);
+    for (let i = 0; i < markings; i++) {
+        const t = i / markings;
+        const x = start.x + (end.x - start.x) * t;
+        const z = start.z + (end.z - start.z) * t;
+        
+        const marking = new THREE.Mesh(markingGeometry, markingMaterial);
+        marking.position.set(x, 0.02, z);
+        marking.rotation.x = -Math.PI / 2;
+        marking.rotation.z = -angle;
+        road.add(marking);
+    }
+}
+
+// Create traffic light
+function createTrafficLight(x, z) {
+    const trafficLightGroup = new THREE.Group();
+    
+    // Pole
     const poleGeometry = new THREE.CylinderGeometry(0.2, 0.2, 8, 8);
     const poleMaterial = new THREE.MeshStandardMaterial({
         color: 0x333333,
         roughness: 0.7,
-        metalness: 0.5
+        metalness: 0.3
     });
     const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-    pole.position.set(x, 4, z);
     pole.castShadow = true;
-    scene.add(pole);
+    trafficLightGroup.add(pole);
 
-    const lightBoxGeometry = new THREE.BoxGeometry(1, 3, 0.5);
-    const lightBoxMaterial = new THREE.MeshStandardMaterial({
+    // Light housing
+    const housingGeometry = new THREE.BoxGeometry(1, 3, 1);
+    const housingMaterial = new THREE.MeshStandardMaterial({
         color: 0x222222,
         roughness: 0.5,
-        metalness: 0.8
+        metalness: 0.5
     });
-    const lightBox = new THREE.Mesh(lightBoxGeometry, lightBoxMaterial);
-    lightBox.position.set(x, 8, z);
-    lightBox.rotation.y = rotation;
-    scene.add(lightBox);
+    const housing = new THREE.Mesh(housingGeometry, housingMaterial);
+    housing.position.y = 5;
+    housing.castShadow = true;
+    trafficLightGroup.add(housing);
 
-    // Add lights with glow
-    const lightPositions = [
-        { y: 0.8, color: 0xff0000 },
-        { y: 0, color: 0xffff00 },
-        { y: -0.8, color: 0x00ff00 }
-    ];
+    // Lights
+    const lightGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+    const redLight = new THREE.Mesh(lightGeometry, new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000 }));
+    const yellowLight = new THREE.Mesh(lightGeometry, new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00 }));
+    const greenLight = new THREE.Mesh(lightGeometry, new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00 }));
 
-    lightPositions.forEach(({ y, color }) => {
-        const lightGeometry = new THREE.SphereGeometry(0.2, 16, 16);
-        const lightMaterial = new THREE.MeshStandardMaterial({
-            color: color,
-            emissive: color,
-            emissiveIntensity: 0.5
-        });
-        const light = new THREE.Mesh(lightGeometry, lightMaterial);
-        light.position.set(x, 8 + y, z);
-        scene.add(light);
+    redLight.position.set(0, 6, 0);
+    yellowLight.position.set(0, 5, 0);
+    greenLight.position.set(0, 4, 0);
 
-        // Add glow
-        const glowGeometry = new THREE.SphereGeometry(0.4, 16, 16);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.3
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        glow.position.set(x, 8 + y, z);
-        scene.add(glow);
-    });
+    trafficLightGroup.add(redLight);
+    trafficLightGroup.add(yellowLight);
+    trafficLightGroup.add(greenLight);
+
+    trafficLightGroup.position.set(x, 0, z);
+    scene.add(trafficLightGroup);
+
+    // Animate traffic lights
+    let state = 0;
+    setInterval(() => {
+        redLight.material.emissive.setHex(state === 0 ? 0xff0000 : 0x000000);
+        yellowLight.material.emissive.setHex(state === 1 ? 0xffff00 : 0x000000);
+        greenLight.material.emissive.setHex(state === 2 ? 0x00ff00 : 0x000000);
+        state = (state + 1) % 3;
+    }, 2000);
 }
 
-// Create tree with more detail
+// Create trees
 function createTree(x, z) {
     const treeGroup = new THREE.Group();
-    treeGroup.position.set(x, 0, z);
-
-    // Load textures
-    const textureLoader = new THREE.TextureLoader();
-    const barkTexture = textureLoader.load('https://threejs.org/examples/textures/bark.jpg');
-    const barkNormalMap = textureLoader.load('https://threejs.org/examples/textures/bark_normal.jpg');
-    const barkRoughnessMap = textureLoader.load('https://threejs.org/examples/textures/bark_roughness.jpg');
-    const leafTexture = textureLoader.load('https://threejs.org/examples/textures/leaves.jpg');
-    const leafNormalMap = textureLoader.load('https://threejs.org/examples/textures/leaves_normal.jpg');
-    const groundTexture = textureLoader.load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg');
-
-    // Configure texture properties
-    [barkTexture, barkNormalMap, barkRoughnessMap].forEach(texture => {
-        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(2, 2);
-    });
-
-    [leafTexture, leafNormalMap].forEach(texture => {
-        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(4, 4);
-    });
-
-    groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
-    groundTexture.repeat.set(1, 1);
-
-    // Create main trunk with realistic wood structure
-    const trunkHeight = 5 + Math.random() * 2;
-    const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, trunkHeight, 12);
+    
+    // Tree trunk
+    const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.7, 5, 8);
     const trunkMaterial = new THREE.MeshStandardMaterial({
-        map: barkTexture,
-        normalMap: barkNormalMap,
-        roughnessMap: barkRoughnessMap,
-        color: 0x4d2926,
+        color: 0x8B4513,
         roughness: 0.9,
-        metalness: 0.1,
-        normalScale: new THREE.Vector2(0.5, 0.5)
+        metalness: 0.1
     });
     const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-    trunk.position.y = trunkHeight / 2;
     trunk.castShadow = true;
+    trunk.receiveShadow = true;
     treeGroup.add(trunk);
 
-    // Function to create a branch with natural curve
-    function createBranch(startPoint, direction, length, radius, parent, isMainBranch = false) {
-        if (!startPoint || !direction) {
-            console.warn('Invalid branch parameters');
-            return null;
-        }
-
-        const segments = 8;
-        const points = [];
-        const curve = new THREE.CatmullRomCurve3();
-        
-        // Create points for curved branch with natural variation
-        for (let i = 0; i <= segments; i++) {
-            const t = i / segments;
-            const naturalCurve = Math.sin(t * Math.PI) * length * 0.2;
-            const randomVariation = (Math.random() - 0.5) * length * 0.1;
-            const point = new THREE.Vector3(
-                startPoint.x + direction.x * length * t + randomVariation,
-                startPoint.y + direction.y * length * t + naturalCurve,
-                startPoint.z + direction.z * length * t + randomVariation
-            );
-            points.push(point);
-        }
-        
-        curve.points = points;
-        
-        // Create branch geometry with tapering
-        const branchGeometry = new THREE.TubeGeometry(curve, segments, radius, 8, false);
-        const branch = new THREE.Mesh(branchGeometry, trunkMaterial);
-        parent.add(branch);
-        
-        return { branch, curve, points, segments };
-    }
-
-    // Create main branches with natural curves
-    const numMainBranches = 4 + Math.floor(Math.random() * 3);
-    const mainBranches = [];
-    
-    for (let i = 0; i < numMainBranches; i++) {
-        const angle = (i * Math.PI * 2) / numMainBranches + (Math.random() - 0.5) * Math.PI / 4;
-        const height = 3 + Math.random() * 2;
-        const length = 2 + Math.random() * 1.5;
-        const radius = 0.15 + Math.random() * 0.1;
-        mainBranches.push({ angle, height, length, radius });
-    }
-
-    mainBranches.forEach(({ angle, height, length, radius }) => {
-        const startPoint = new THREE.Vector3(
-            Math.sin(angle) * 0.5,
-            height,
-            Math.cos(angle) * 0.5
-        );
-        const direction = new THREE.Vector3(
-            Math.sin(angle),
-            0.2 + Math.random() * 0.2,
-            Math.cos(angle)
-        ).normalize();
-        
-        const branchResult = createBranch(startPoint, direction, length, radius, treeGroup, true);
-        
-        if (branchResult) {
-            const { branch, curve, points, segments } = branchResult;
-            
-            // Add smaller branches with natural distribution
-            const numSubBranches = 2 + Math.floor(Math.random() * 3);
-            for (let i = 0; i < numSubBranches; i++) {
-                const t = 0.3 + i * 0.3;
-                const pointIndex = Math.floor(t * segments);
-                if (pointIndex < points.length) {
-                    const branchPoint = points[pointIndex];
-                    const subAngle = angle + (Math.random() - 0.5) * Math.PI / 2;
-                    const subDirection = new THREE.Vector3(
-                        Math.sin(subAngle),
-                        0.3 + Math.random() * 0.2,
-                        Math.cos(subAngle)
-                    ).normalize();
-                    
-                    createBranch(branchPoint, subDirection, length * 0.6, radius * 0.6, treeGroup);
-                }
-            }
-        }
+    // Tree top
+    const topGeometry = new THREE.ConeGeometry(3, 6, 8);
+    const topMaterial = new THREE.MeshStandardMaterial({
+        color: 0x228B22,
+        roughness: 0.8,
+        metalness: 0.2
     });
+    const top = new THREE.Mesh(topGeometry, topMaterial);
+    top.position.y = 5;
+    top.castShadow = true;
+    treeGroup.add(top);
 
-    // Create leaf clusters with more natural distribution
-    function createLeafCluster(position, size, color) {
-        const clusterGroup = new THREE.Group();
-        clusterGroup.position.copy(position);
-
-        // Create multiple leaf layers for depth
-        const leafLayers = 4;
-        for (let i = 0; i < leafLayers; i++) {
-            const layerSize = size * (1 - i * 0.15);
-            const leafGeometry = new THREE.ConeGeometry(layerSize, layerSize * 1.5, 8);
-            const leafMaterial = new THREE.MeshStandardMaterial({
-                map: leafTexture,
-                normalMap: leafNormalMap,
-                color: color,
-                roughness: 0.8,
-                metalness: 0.2,
-                flatShading: true,
-                normalScale: new THREE.Vector2(0.5, 0.5),
-                transparent: true,
-                opacity: 0.9,
-                alphaTest: 0.5
-            });
-            
-            const leafLayer = new THREE.Mesh(leafGeometry, leafMaterial);
-            leafLayer.position.y = i * 0.3;
-            leafLayer.rotation.y = (i * Math.PI) / 4;
-            clusterGroup.add(leafLayer);
-        }
-
-        return clusterGroup;
-    }
-
-    // Create foliage with multiple clusters and natural variation
-    const leafColors = [
-        0x2d5a27, // Dark green
-        0x1e4020, // Forest green
-        0x3d6a37, // Medium green
-        0x4a7a42  // Light green
-    ];
-
-    const leafSizes = [3.5, 3, 2.5, 2];
-    const leafHeights = [7, 6.5, 6, 5.5];
-
-    // Create main foliage clusters with natural distribution
-    leafColors.forEach((color, i) => {
-        const mainCluster = createLeafCluster(
-            new THREE.Vector3(0, leafHeights[i], 0),
-            leafSizes[i],
-            color
-        );
-        treeGroup.add(mainCluster);
-
-        // Add smaller clusters around main cluster with natural variation
-        const numClusters = 4 + Math.floor(Math.random() * 3);
-        for (let j = 0; j < numClusters; j++) {
-            const angle = (j * Math.PI * 2) / numClusters + (Math.random() - 0.5) * Math.PI / 4;
-            const distance = leafSizes[i] * (0.5 + Math.random() * 0.3);
-            const offset = new THREE.Vector3(
-                Math.sin(angle) * distance,
-                (Math.random() - 0.5) * 0.5,
-                Math.cos(angle) * distance
-            );
-            const smallCluster = createLeafCluster(
-                new THREE.Vector3(0, leafHeights[i], 0).add(offset),
-                leafSizes[i] * (0.6 + Math.random() * 0.2),
-                color
-            );
-            treeGroup.add(smallCluster);
-        }
-    });
-
-    // Add ground foliage with proper material
-    const groundFoliageGeometry = new THREE.CircleGeometry(2, 8);
-    const groundFoliageMaterial = new THREE.MeshStandardMaterial({
-        map: groundTexture,
-        color: 0x2d5a27,
-        roughness: 0.9,
-        metalness: 0.1,
-        side: THREE.DoubleSide
-    });
-    const groundFoliage = new THREE.Mesh(groundFoliageGeometry, groundFoliageMaterial);
-    groundFoliage.rotation.x = -Math.PI / 2;
-    groundFoliage.position.y = 0.1;
-    groundFoliage.receiveShadow = true;
-    treeGroup.add(groundFoliage);
-
-    // Add some random small rocks with proper material
-    for (let i = 0; i < 5; i++) {
-        const rockGeometry = new THREE.DodecahedronGeometry(0.2 + Math.random() * 0.3, 0);
-        const rockMaterial = new THREE.MeshStandardMaterial({
-            color: 0x666666,
-            roughness: 0.9,
-            metalness: 0.1,
-            normalScale: new THREE.Vector2(0.5, 0.5)
-        });
-        const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-        const angle = (i * Math.PI * 2) / 5;
-        rock.position.set(
-            Math.sin(angle) * 2,
-            0.1,
-            Math.cos(angle) * 2
-        );
-        rock.rotation.set(
-            Math.random() * Math.PI,
-            Math.random() * Math.PI,
-            Math.random() * Math.PI
-        );
-        rock.castShadow = true;
-        treeGroup.add(rock);
-    }
-
+    treeGroup.position.set(x, 0, z);
     scene.add(treeGroup);
-    return treeGroup;
 }
 
-// Create buildings in a larger grid
-const buildingGrid = {
-    minX: -3,
-    maxX: 3,
-    minZ: -3,
-    maxZ: 3
-};
+// Create street lamps
+function createStreetLamp(x, z) {
+    const lampGroup = new THREE.Group();
+    
+    // Pole
+    const poleGeometry = new THREE.CylinderGeometry(0.2, 0.2, 8, 8);
+    const poleMaterial = new THREE.MeshStandardMaterial({
+        color: 0x333333,
+        roughness: 0.7,
+        metalness: 0.3
+    });
+    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+    pole.castShadow = true;
+    lampGroup.add(pole);
 
-for (let i = buildingGrid.minX; i <= buildingGrid.maxX; i++) {
-    for (let j = buildingGrid.minZ; j <= buildingGrid.maxZ; j++) {
-        // Skip center area for main roads
-        if (Math.abs(i) <= 1 && Math.abs(j) <= 1) continue;
+    // Lamp head
+    const headGeometry = new THREE.BoxGeometry(1, 0.5, 1);
+    const headMaterial = new THREE.MeshStandardMaterial({
+        color: 0x222222,
+        roughness: 0.5,
+        metalness: 0.5
+    });
+    const head = new THREE.Mesh(headGeometry, headMaterial);
+    head.position.y = 7;
+    head.castShadow = true;
+    lampGroup.add(head);
 
-        const x = i * (blockSize + roadWidth);
-        const z = j * (blockSize + roadWidth);
-        
-        // Add multiple buildings per block
-        const buildingsPerBlock = 2 + Math.floor(Math.random() * 3);
-        for (let k = 0; k < buildingsPerBlock; k++) {
-            const offsetX = (Math.random() - 0.5) * blockSize * 0.8;
-            const offsetZ = (Math.random() - 0.5) * blockSize * 0.8;
-            
-            const width = blockSize * (0.3 + Math.random() * 0.4);
-            const depth = blockSize * (0.3 + Math.random() * 0.4);
-            const height = 20 + Math.random() * 40;
-            
-            createBuilding(x + offsetX, z + offsetZ, width, depth, height);
-        }
+    // Light
+    const light = new THREE.PointLight(0xffffcc, 1, 20);
+    light.position.set(0, 7, 0);
+    lampGroup.add(light);
+
+    lampGroup.position.set(x, 0, z);
+    scene.add(lampGroup);
+}
+
+// Create benches
+function createBench(x, z, rotation = 0) {
+    const benchGroup = new THREE.Group();
+    
+    // Seat
+    const seatGeometry = new THREE.BoxGeometry(4, 0.5, 1);
+    const seatMaterial = new THREE.MeshStandardMaterial({
+        color: 0x8B4513,
+        roughness: 0.8,
+        metalness: 0.2
+    });
+    const seat = new THREE.Mesh(seatGeometry, seatMaterial);
+    seat.position.y = 1;
+    seat.castShadow = true;
+    benchGroup.add(seat);
+
+    // Back
+    const backGeometry = new THREE.BoxGeometry(4, 1, 0.5);
+    const back = new THREE.Mesh(backGeometry, seatMaterial);
+    back.position.set(0, 1.75, -0.75);
+    back.castShadow = true;
+    benchGroup.add(back);
+
+    // Legs
+    const legGeometry = new THREE.BoxGeometry(0.2, 1, 0.2);
+    const legMaterial = new THREE.MeshStandardMaterial({
+        color: 0x333333,
+        roughness: 0.7,
+        metalness: 0.3
+    });
+
+    for (let i = -1.5; i <= 1.5; i += 3) {
+        const leg = new THREE.Mesh(legGeometry, legMaterial);
+        leg.position.set(i, 0.5, 0);
+        leg.castShadow = true;
+        benchGroup.add(leg);
     }
+
+    benchGroup.rotation.y = rotation;
+    benchGroup.position.set(x, 0, z);
+    scene.add(benchGroup);
 }
 
-// Add traffic lights at all major intersections
-const intersections = [];
+// Create the city layout
+// Main roads
+createRoad(0, 0, roadWidth, groundSize, 0);
+createRoad(0, 0, roadWidth, groundSize, Math.PI / 2);
+
+// Buildings
 for (let i = -3; i <= 3; i++) {
     for (let j = -3; j <= 3; j++) {
-        if (Math.abs(i) <= 1 && Math.abs(j) <= 1) continue;
-        intersections.push({
-            x: i * (blockSize + roadWidth),
-            z: j * (blockSize + roadWidth)
-        });
-    }
-}
-
-intersections.forEach(intersection => {
-    createTrafficLight(intersection.x + roadWidth/2 + 2, intersection.z, 0);
-    createTrafficLight(intersection.x - roadWidth/2 - 2, intersection.z, Math.PI);
-    createTrafficLight(intersection.x, intersection.z + roadWidth/2 + 2, Math.PI/2);
-    createTrafficLight(intersection.x, intersection.z - roadWidth/2 - 2, -Math.PI/2);
-});
-
-// Add more trees throughout the city
-for (let i = buildingGrid.minX; i <= buildingGrid.maxX; i++) {
-    for (let j = buildingGrid.minZ; j <= buildingGrid.maxZ; j++) {
-        if (Math.random() > 0.7) {
-            const x = i * (blockSize + roadWidth) + (Math.random() - 0.5) * blockSize;
-            const z = j * (blockSize + roadWidth) + (Math.random() - 0.5) * blockSize;
-            createTree(x, z);
+        if (Math.abs(i) > 1 || Math.abs(j) > 1) {
+            const height = 20 + Math.random() * 30;
+            createBuilding(
+                i * blockSize,
+                j * blockSize,
+                15 + Math.random() * 10,
+                height,
+                15 + Math.random() * 10
+            );
         }
     }
 }
 
-// Update grid helper size
-const gridHelper = new THREE.GridHelper(groundSize, 40);
-scene.add(gridHelper);
-
-// Update camera position for better view of larger city
-camera.position.set(100, 100, 100);
-camera.lookAt(0, 0, 0);
-
-// Create car function
-function createCar(x, z) {
-    const carGroup = new THREE.Group();
-    carGroup.position.set(x, 0, z);
-
-    // Create environment map for better reflections
-    const envMap = new THREE.CubeTextureLoader().load([
-        'https://threejs.org/examples/textures/cube/Park2/posx.jpg',
-        'https://threejs.org/examples/textures/cube/Park2/negx.jpg',
-        'https://threejs.org/examples/textures/cube/Park2/posy.jpg',
-        'https://threejs.org/examples/textures/cube/Park2/negy.jpg',
-        'https://threejs.org/examples/textures/cube/Park2/posz.jpg',
-        'https://threejs.org/examples/textures/cube/Park2/negz.jpg'
-    ]);
-    scene.environment = envMap;
-
-    // Car materials
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0066cc,
-        roughness: 0.05,
-        metalness: 0.95,
-        envMap: envMap,
-        envMapIntensity: 1.2,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.1
-    });
-    const chromeMaterial = new THREE.MeshStandardMaterial({
-        color: 0xcccccc,
-        roughness: 0.1,
-        metalness: 0.9,
-        envMap: envMap,
-        envMapIntensity: 1.0
-    });
-    const glassMaterial = new THREE.MeshStandardMaterial({
-        color: 0x88ccff,
-        roughness: 0.05,
-        metalness: 0.9,
-        transparent: true,
-        opacity: 0.7,
-        envMap: envMap,
-        envMapIntensity: 1.5,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.1
-    });
-    const blackMaterial = new THREE.MeshStandardMaterial({
-        color: 0x111111,
-        roughness: 0.7,
-        metalness: 0.3,
-        envMap: envMap,
-        envMapIntensity: 0.3
-    });
-
-    // Car body
-    const bodyWidth = 6;
-    const bodyLength = 12;
-    const bodyHeight = 2;
-    const body = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyLength),
-        bodyMaterial
-    );
-    body.position.y = bodyHeight / 2;
-    carGroup.add(body);
-
-    // Roof
-    const roof = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyWidth - 0.5, 1.5, bodyLength * 0.4),
-        bodyMaterial
-    );
-    roof.position.set(0, bodyHeight + 0.75, -0.5);
-    carGroup.add(roof);
-
-    // Hood
-    const hood = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyWidth - 0.5, 0.2, bodyLength * 0.25),
-        bodyMaterial
-    );
-    hood.position.set(0, bodyHeight/2 + 0.1, bodyLength/2 - 1.5);
-    carGroup.add(hood);
-
-    // Trunk
-    const trunk = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyWidth - 0.5, 0.2, bodyLength * 0.25),
-        bodyMaterial
-    );
-    trunk.position.set(0, bodyHeight/2 + 0.1, -bodyLength/2 + 1.5);
-    carGroup.add(trunk);
-
-    // Front windshield
-    const frontWindshield = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyWidth - 1, 1.8),
-        glassMaterial
-    );
-    frontWindshield.position.set(0, bodyHeight + 0.9, bodyLength/2 - 1);
-    frontWindshield.rotation.x = Math.PI / 6;
-    carGroup.add(frontWindshield);
-
-    // Rear windshield
-    const rearWindshield = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyWidth - 1, 1.8),
-        glassMaterial
-    );
-    rearWindshield.position.set(0, bodyHeight + 0.9, -bodyLength/2 + 1);
-    rearWindshield.rotation.x = -Math.PI / 6;
-    carGroup.add(rearWindshield);
-
-    // Side windows
-    const sideWindowGeometry = new THREE.PlaneGeometry(bodyLength * 0.4, 1.5);
-    const leftWindow = new THREE.Mesh(sideWindowGeometry, glassMaterial);
-    leftWindow.position.set(-bodyWidth/2 - 0.01, bodyHeight + 0.75, -0.5);
-    leftWindow.rotation.y = Math.PI / 2;
-    carGroup.add(leftWindow);
-    const rightWindow = leftWindow.clone();
-    rightWindow.position.set(bodyWidth/2 + 0.01, bodyHeight + 0.75, -0.5);
-    rightWindow.rotation.y = -Math.PI / 2;
-    carGroup.add(rightWindow);
-
-    // Bumpers
-    const frontBumper = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyWidth, 0.8, 0.6),
-        blackMaterial
-    );
-    frontBumper.position.set(0, 0.4, bodyLength/2 + 0.3);
-    carGroup.add(frontBumper);
-    const rearBumper = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyWidth, 0.8, 0.6),
-        blackMaterial
-    );
-    rearBumper.position.set(0, 0.4, -bodyLength/2 - 0.3);
-    carGroup.add(rearBumper);
-
-    // Grille
-    const grille = new THREE.Mesh(
-        new THREE.BoxGeometry(3, 1.2, 0.1),
-        blackMaterial
-    );
-    grille.position.set(0, bodyHeight/2 + 0.6, bodyLength/2 + 0.05);
-    carGroup.add(grille);
-
-    // Headlights
-    const headlightGeometry = new THREE.CircleGeometry(0.45, 32);
-    const headlightMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xffffff,
-        emissiveIntensity: 0.5,
-        roughness: 0.05,
-        metalness: 0.9,
-        envMap: envMap,
-        envMapIntensity: 1.0,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.1
-    });
-    const leftHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
-    leftHeadlight.position.set(-1.5, bodyHeight/2 + 0.6, bodyLength/2 + 0.05);
-    carGroup.add(leftHeadlight);
-    const rightHeadlight = leftHeadlight.clone();
-    rightHeadlight.position.set(1.5, bodyHeight/2 + 0.6, bodyLength/2 + 0.05);
-    carGroup.add(rightHeadlight);
-
-    // Taillights
-    const taillightGeometry = new THREE.CircleGeometry(0.45, 32);
-    const taillightMaterial = new THREE.MeshStandardMaterial({
-        color: 0xff0000,
-        emissive: 0xff0000,
-        emissiveIntensity: 0.5,
-        roughness: 0.05,
-        metalness: 0.9,
-        envMap: envMap,
-        envMapIntensity: 1.0,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.1
-    });
-    const leftTaillight = new THREE.Mesh(taillightGeometry, taillightMaterial);
-    leftTaillight.position.set(-1.5, bodyHeight/2 + 0.6, -bodyLength/2 - 0.05);
-    carGroup.add(leftTaillight);
-    const rightTaillight = leftTaillight.clone();
-    rightTaillight.position.set(1.5, bodyHeight/2 + 0.6, -bodyLength/2 - 0.05);
-    carGroup.add(rightTaillight);
-
-    // Wheels
-    const wheelGeometry = new THREE.CylinderGeometry(0.9, 0.9, 0.6, 32);
-    wheelGeometry.rotateZ(Math.PI / 2);
-    const wheelRimGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.6, 32);
-    wheelRimGeometry.rotateZ(Math.PI / 2);
-    function createWheel(x, z) {
-        const wheelGroup = new THREE.Group();
-        const tire = new THREE.Mesh(wheelGeometry, blackMaterial);
-        wheelGroup.add(tire);
-        const rim = new THREE.Mesh(wheelRimGeometry, chromeMaterial);
-        wheelGroup.add(rim);
-        for (let i = 0; i < 5; i++) {
-            const spokeGeometry = new THREE.BoxGeometry(0.1, 0.9, 0.05);
-            const spoke = new THREE.Mesh(spokeGeometry, chromeMaterial);
-            spoke.rotation.z = (i * Math.PI * 2) / 5;
-            wheelGroup.add(spoke);
-        }
-        wheelGroup.position.set(x, 0.9, z);
-        wheelGroup.castShadow = true;
-        return wheelGroup;
+// Load and create Leiden city
+async function initLeiden() {
+    const geojsonData = await fetchLeidenData();
+    if (geojsonData) {
+        createBuildings(geojsonData);
+        createRoads(geojsonData);
     }
-    carGroup.add(createWheel(-bodyWidth/2 - 0.3, bodyLength/4));
-    carGroup.add(createWheel(bodyWidth/2 + 0.3, bodyLength/4));
-    carGroup.add(createWheel(-bodyWidth/2 - 0.3, -bodyLength/4));
-    carGroup.add(createWheel(bodyWidth/2 + 0.3, -bodyLength/4));
-
-    // Side mirrors
-    const sideMirrorGeometry = new THREE.BoxGeometry(1.2, 0.6, 0.3);
-    const leftMirror = new THREE.Mesh(sideMirrorGeometry, bodyMaterial);
-    leftMirror.position.set(-bodyWidth/2 - 0.6, bodyHeight + 0.3, bodyLength/4);
-    carGroup.add(leftMirror);
-    const rightMirror = leftMirror.clone();
-    rightMirror.position.set(bodyWidth/2 + 0.6, bodyHeight + 0.3, bodyLength/4);
-    carGroup.add(rightMirror);
-    const sideMirrorGlassGeometry = new THREE.PlaneGeometry(1, 0.5);
-    const leftMirrorGlass = new THREE.Mesh(sideMirrorGlassGeometry, glassMaterial);
-    leftMirrorGlass.position.set(-bodyWidth/2 - 0.75, bodyHeight + 0.3, bodyLength/4);
-    leftMirrorGlass.rotation.y = Math.PI / 2;
-    carGroup.add(leftMirrorGlass);
-    const rightMirrorGlass = leftMirrorGlass.clone();
-    rightMirrorGlass.position.set(bodyWidth/2 + 0.75, bodyHeight + 0.3, bodyLength/4);
-    rightMirrorGlass.rotation.y = -Math.PI / 2;
-    carGroup.add(rightMirrorGlass);
-
-    // Four doors with handles, panel lines, and windows
-    const doorMaterial = bodyMaterial;
-    const doorHandleMaterial = chromeMaterial;
-    const doorPanelLineMaterial = new THREE.MeshStandardMaterial({
-        color: 0x111111,
-        roughness: 0.5,
-        metalness: 0.2,
-        envMap: envMap,
-        envMapIntensity: 0.3
-    });
-    // Front left door
-    const frontLeftDoorGeometry = new THREE.BoxGeometry(0.2, bodyHeight - 0.2, bodyLength * 0.25);
-    const frontLeftDoor = new THREE.Mesh(frontLeftDoorGeometry, doorMaterial);
-    frontLeftDoor.position.set(-bodyWidth/2 - 0.1, bodyHeight/2, bodyLength/4);
-    carGroup.add(frontLeftDoor);
-    // Front right door
-    const frontRightDoor = frontLeftDoor.clone();
-    frontRightDoor.position.set(bodyWidth/2 + 0.1, bodyHeight/2, bodyLength/4);
-    carGroup.add(frontRightDoor);
-    // Rear left door
-    const rearLeftDoorGeometry = new THREE.BoxGeometry(0.2, bodyHeight - 0.2, bodyLength * 0.25);
-    const rearLeftDoor = new THREE.Mesh(rearLeftDoorGeometry, doorMaterial);
-    rearLeftDoor.position.set(-bodyWidth/2 - 0.1, bodyHeight/2, -bodyLength/4);
-    carGroup.add(rearLeftDoor);
-    // Rear right door
-    const rearRightDoor = rearLeftDoor.clone();
-    rearRightDoor.position.set(bodyWidth/2 + 0.1, bodyHeight/2, -bodyLength/4);
-    carGroup.add(rearRightDoor);
-    // Door handles
-    function createDoorHandle(x, z) {
-        const handleGroup = new THREE.Group();
-        const handleBodyGeometry = new THREE.BoxGeometry(0.4, 0.1, 0.05);
-        const handleBody = new THREE.Mesh(handleBodyGeometry, doorHandleMaterial);
-        handleBody.position.set(0, 0, 0.05);
-        handleGroup.add(handleBody);
-        const handleGripGeometry = new THREE.BoxGeometry(0.3, 0.05, 0.1);
-        const handleGrip = new THREE.Mesh(handleGripGeometry, doorHandleMaterial);
-        handleGrip.position.set(0, 0, 0.1);
-        handleGroup.add(handleGrip);
-        const handleMountGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.05);
-        const handleMount = new THREE.Mesh(handleMountGeometry, doorHandleMaterial);
-        handleMount.position.set(0, 0, 0);
-        handleGroup.add(handleMount);
-        handleGroup.position.set(x, bodyHeight/2, z);
-        return handleGroup;
-    }
-    carGroup.add(createDoorHandle(-bodyWidth/2 - 0.2, bodyLength/4));
-    carGroup.add(createDoorHandle(bodyWidth/2 + 0.2, bodyLength/4));
-    carGroup.add(createDoorHandle(-bodyWidth/2 - 0.2, -bodyLength/4));
-    carGroup.add(createDoorHandle(bodyWidth/2 + 0.2, -bodyLength/4));
-    // Door panel lines
-    function createDoorPanelLine(x, z) {
-        const panelLineGeometry = new THREE.BoxGeometry(0.02, bodyHeight - 0.2, bodyLength * 0.25);
-        const panelLine = new THREE.Mesh(panelLineGeometry, doorPanelLineMaterial);
-        panelLine.position.set(x, bodyHeight/2, z);
-        return panelLine;
-    }
-    carGroup.add(createDoorPanelLine(-bodyWidth/2 - 0.11, bodyLength/4));
-    carGroup.add(createDoorPanelLine(bodyWidth/2 + 0.11, bodyLength/4));
-    carGroup.add(createDoorPanelLine(-bodyWidth/2 - 0.11, -bodyLength/4));
-    carGroup.add(createDoorPanelLine(bodyWidth/2 + 0.11, -bodyLength/4));
-    // Door windows
-    function createDoorWindow(x, z) {
-        const windowGeometry = new THREE.PlaneGeometry(bodyLength * 0.2, bodyHeight * 0.6);
-        const window = new THREE.Mesh(windowGeometry, glassMaterial);
-        window.position.set(x, bodyHeight/2 + 0.2, z);
-        window.rotation.y = x < 0 ? Math.PI/2 : -Math.PI/2;
-        return window;
-    }
-    carGroup.add(createDoorWindow(-bodyWidth/2 - 0.15, bodyLength/4));
-    carGroup.add(createDoorWindow(bodyWidth/2 + 0.15, bodyLength/4));
-    carGroup.add(createDoorWindow(-bodyWidth/2 - 0.15, -bodyLength/4));
-    carGroup.add(createDoorWindow(bodyWidth/2 + 0.15, -bodyLength/4));
-
-    // Interior (dashboard, seats, etc.)
-    const interiorMaterial = new THREE.MeshStandardMaterial({
-        color: 0x222222,
-        roughness: 0.7,
-        metalness: 0.3,
-        envMap: envMap,
-        envMapIntensity: 0.3
-    });
-    const seatMaterial = new THREE.MeshStandardMaterial({
-        color: 0x333333,
-        roughness: 0.8,
-        metalness: 0.2,
-        envMap: envMap,
-        envMapIntensity: 0.2
-    });
-    const dashboardMaterial = new THREE.MeshStandardMaterial({
-        color: 0x111111,
-        roughness: 0.5,
-        metalness: 0.5,
-        envMap: envMap,
-        envMapIntensity: 0.4
-    });
-    // Dashboard
-    const dashboard = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyWidth - 1, 0.8, 1.5),
-        dashboardMaterial
-    );
-    dashboard.position.set(0, bodyHeight/2 + 0.4, bodyLength/2 - 1.5);
-    carGroup.add(dashboard);
-    // Steering wheel
-    const steeringWheelGroup = new THREE.Group();
-    const steeringWheelRimGeometry = new THREE.TorusGeometry(0.4, 0.05, 16, 32);
-    const rim = new THREE.Mesh(steeringWheelRimGeometry, interiorMaterial);
-    rim.rotation.x = Math.PI / 2;
-    steeringWheelGroup.add(rim);
-    const spokeGeometry = new THREE.CylinderGeometry(0.02, 0.02, 0.4);
-    for (let i = 0; i < 3; i++) {
-        const spoke = new THREE.Mesh(spokeGeometry, interiorMaterial);
-        spoke.rotation.z = (i * Math.PI * 2) / 3;
-        steeringWheelGroup.add(spoke);
-    }
-    steeringWheelGroup.position.set(-1.2, bodyHeight/2 + 0.6, bodyLength/2 - 1.5);
-    steeringWheelGroup.rotation.y = Math.PI / 6;
-    carGroup.add(steeringWheelGroup);
-    // Seats
-    function createSeat(x, z, isDriver = false) {
-        const seatGroup = new THREE.Group();
-        const base = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 1.2), seatMaterial);
-        base.position.y = 0.15;
-        seatGroup.add(base);
-        const back = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 0.3), seatMaterial);
-        back.position.set(0, 0.9, -0.45);
-        back.rotation.x = Math.PI / 6;
-        seatGroup.add(back);
-        const headrest = new THREE.Mesh(new THREE.BoxGeometry(1, 0.3, 0.2), seatMaterial);
-        headrest.position.set(0, 1.5, -0.3);
-        seatGroup.add(headrest);
-        if (isDriver) {
-            const adjustment = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), interiorMaterial);
-            adjustment.position.set(0.5, 0.2, 0.5);
-            seatGroup.add(adjustment);
-        }
-        seatGroup.position.set(x, 0.3, z);
-        return seatGroup;
-    }
-    carGroup.add(createSeat(-1.2, bodyLength/2 - 2.5, true));
-    carGroup.add(createSeat(1.2, bodyLength/2 - 2.5));
-    carGroup.add(createSeat(-1.2, bodyLength/2 - 4.5));
-    carGroup.add(createSeat(1.2, bodyLength/2 - 4.5));
-    // Center console
-    const console = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 2), dashboardMaterial);
-    console.position.set(0, bodyHeight/2 + 0.2, bodyLength/2 - 3);
-    carGroup.add(console);
-    // Gear shift
-    const gearShift = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3), interiorMaterial);
-    gearShift.position.set(0, bodyHeight/2 + 0.5, bodyLength/2 - 3);
-    carGroup.add(gearShift);
-    // Gear shift knob
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), interiorMaterial);
-    knob.position.set(0, bodyHeight/2 + 0.65, bodyLength/2 - 3);
-    carGroup.add(knob);
-    // Rear view mirror
-    const rearMirror = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.2), interiorMaterial);
-    rearMirror.position.set(0, bodyHeight + 0.4, bodyLength/2 - 1.2);
-    carGroup.add(rearMirror);
-    const rearMirrorGlass = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.1), glassMaterial);
-    rearMirrorGlass.position.set(0, bodyHeight + 0.4, bodyLength/2 - 1.1);
-    rearMirrorGlass.rotation.x = Math.PI / 2;
-    carGroup.add(rearMirrorGlass);
-    // Floor mats
-    const floorMat = new THREE.Mesh(new THREE.PlaneGeometry(3, 4), new THREE.MeshStandardMaterial({
-        color: 0x111111,
-        roughness: 0.9,
-        metalness: 0.1,
-        envMap: envMap,
-        envMapIntensity: 0.2
-    }));
-    floorMat.rotation.x = -Math.PI / 2;
-    floorMat.position.set(0, 0.01, bodyLength/2 - 3);
-    carGroup.add(floorMat);
-
-    // Add car to scene
-    scene.add(carGroup);
-    return carGroup;
 }
 
-// Create a car in the city
-const car = createCar(0, 0);
+// Initialize Leiden city
+initLeiden();
 
 // Animation loop
 function animate() {
@@ -1027,7 +736,7 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// Handle window resizing
+// Handle window resize
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -1035,4 +744,167 @@ window.addEventListener('resize', () => {
 });
 
 // Start animation
-animate(); 
+animate();
+
+// Add street furniture
+function addStreetFurniture(road, start, end, length, angle) {
+    // Calculate positions along the road
+    const spacing = 20; // Space between items
+    const items = Math.floor(length / spacing);
+    
+    for (let i = 0; i < items; i++) {
+        const t = i / items;
+        const x = start.x + (end.x - start.x) * t;
+        const z = start.z + (end.z - start.z) * t;
+        
+        // Randomly decide whether to place a tree or lamp post
+        if (Math.random() < 0.7) { // 70% chance for trees
+            addTree(x, z, angle);
+        } else {
+            addLampPost(x, z, angle);
+        }
+    }
+}
+
+// Add a tree
+function addTree(x, z, angle) {
+    if (!treeModel) return;
+    
+    const tree = treeModel.clone();
+    
+    // Random scale variation
+    const scale = 0.5 + Math.random() * 0.3;
+    tree.scale.set(scale, scale, scale);
+    
+    // Position tree slightly off the sidewalk
+    const offset = 3; // Distance from road center
+    tree.position.set(
+        x - Math.sin(angle) * offset,
+        0,
+        z + Math.cos(angle) * offset
+    );
+    
+    // Random rotation
+    tree.rotation.y = Math.random() * Math.PI * 2;
+    
+    // Enable shadows
+    tree.traverse((child) => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
+    });
+    
+    scene.add(tree);
+}
+
+// Add a lamp post
+function addLampPost(x, z, angle) {
+    if (!lampPostModel) return;
+    
+    const lamp = lampPostModel.clone();
+    
+    // Scale to appropriate size
+    lamp.scale.set(0.5, 0.5, 0.5);
+    
+    // Position lamp on the sidewalk
+    const offset = 2; // Distance from road center
+    lamp.position.set(
+        x - Math.sin(angle) * offset,
+        0,
+        z + Math.cos(angle) * offset
+    );
+    
+    // Rotate to face the road
+    lamp.rotation.y = angle + Math.PI / 2;
+    
+    // Add point light
+    const light = new THREE.PointLight(0xffffcc, 1, 20);
+    light.position.set(0, 5, 0);
+    lamp.add(light);
+    
+    // Enable shadows
+    lamp.traverse((child) => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
+    });
+    
+    scene.add(lamp);
+}
+
+// Create a simple road function
+function createRoad(x, z, width, length, rotation = 0) {
+    const roadGeometry = new THREE.PlaneGeometry(width, length);
+    const roadMaterial = new THREE.MeshStandardMaterial({
+        color: 0x333333,
+        roughness: 0.9,
+        metalness: 0.1
+    });
+    const road = new THREE.Mesh(roadGeometry, roadMaterial);
+    road.rotation.x = -Math.PI / 2;
+    road.rotation.z = rotation;
+    road.position.set(x, 0.01, z);
+    road.receiveShadow = true;
+    scene.add(road);
+    return road;
+}
+
+// Update the city layout creation
+function createCityLayout() {
+    // Main roads
+    createRoad(0, 0, roadWidth, groundSize, 0);
+    createRoad(0, 0, roadWidth, groundSize, Math.PI / 2);
+
+    // Buildings
+    for (let i = -3; i <= 3; i++) {
+        for (let j = -3; j <= 3; j++) {
+            if (Math.abs(i) > 1 || Math.abs(j) > 1) {
+                const height = 20 + Math.random() * 30;
+                createBuilding(
+                    i * blockSize,
+                    j * blockSize,
+                    15 + Math.random() * 10,
+                    height,
+                    15 + Math.random() * 10
+                );
+            }
+        }
+    }
+}
+
+// Call createCityLayout instead of direct createRoad calls
+createCityLayout();
+
+function createBuilding(x, z, width, height, depth) {
+    // Choose a random material type for variety
+    const materialTypes = ['brick', 'concrete', 'glass'];
+    const materialType = materialTypes[Math.floor(Math.random() * materialTypes.length)];
+    const textures = buildingTextures[materialType];
+
+    let buildingMaterial;
+    if (textures.color && textures.normal && textures.roughness && textures.ao) {
+        buildingMaterial = new THREE.MeshPhysicalMaterial({
+            map: textures.color,
+            normalMap: textures.normal,
+            roughnessMap: textures.roughness,
+            aoMap: textures.ao,
+            roughness: materialType === 'glass' ? 0.1 : 0.7,
+            metalness: materialType === 'glass' ? 0.9 : 0.2,
+            clearcoat: materialType === 'glass' ? 1.0 : 0.0,
+            clearcoatRoughness: materialType === 'glass' ? 0.1 : 0.5,
+            transparent: materialType === 'glass',
+            opacity: materialType === 'glass' ? 0.7 : 1.0
+        });
+    } else {
+        buildingMaterial = proceduralMaterials[materialType].clone();
+    }
+
+    const geometry = new THREE.BoxGeometry(width, height, depth);
+    const mesh = new THREE.Mesh(geometry, buildingMaterial);
+    mesh.position.set(x, height / 2, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+} 

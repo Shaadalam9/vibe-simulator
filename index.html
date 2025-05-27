@@ -3,14 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D City Test</title>
+    <title>Simple 3D City</title>
     <style>
       body { margin: 0; overflow: hidden; }
-      canvas { display: block; }
+      #scene-container {
+        width: 100vw;
+        height: 100vh;
+      }
     </style>
   </head>
   <body>
-    <script type="module" src="./test-scene.js"></script>
+    <div id="scene-container"></div>
+    <script type="module">
+      import { SimpleCity } from './src/simple-city.js';
+      
+      // Initialize the scene
+      const city = new SimpleCity('scene-container');
+    </script>
   </body>
 </html>
 
