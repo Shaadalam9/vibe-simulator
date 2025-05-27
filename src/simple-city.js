@@ -17,6 +17,8 @@ class SimpleCity {
         this.pathsGroup = new THREE.Group();
         this.streetElementsGroup = new THREE.Group();
         this.environmentGroup = new THREE.Group();
+        this.weatherGroup = new THREE.Group();
+        this.skyGroup = new THREE.Group();
         
         // Add groups to scene
         this.scene.add(this.buildingsGroup);
@@ -26,7 +28,29 @@ class SimpleCity {
         this.scene.add(this.pathsGroup);
         this.scene.add(this.streetElementsGroup);
         this.scene.add(this.environmentGroup);
+        this.scene.add(this.weatherGroup);
+        this.scene.add(this.skyGroup);
 
+        // Weather properties
+        this.weather = {
+            type: 'clear', // 'clear', 'rain', 'fog'
+            intensity: 0.5,
+            rainParticles: [],
+            fogDensity: 0.0,
+            isActive: false
+        };
+        
+        // Sky properties
+        this.sky = {
+            time: 0.5, // 0 to 1 (0 = midnight, 0.5 = noon)
+            turbidity: 10,
+            rayleigh: 2,
+            mieCoefficient: 0.005,
+            mieDirectionalG: 0.8,
+            elevation: 45,
+            azimuth: 180
+        };
+        
         // Load textures
         this.loadTextures();
         
@@ -83,6 +107,8 @@ class SimpleCity {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 0.5;
         this.container.appendChild(this.renderer.domElement);
 
         // Setup camera
@@ -97,6 +123,9 @@ class SimpleCity {
         this.controls.maxDistance = 50;
         this.controls.maxPolarAngle = Math.PI / 2 - 0.1;
         this.controls.update();
+
+        // Initialize sky
+        this.initSky();
 
         // Setup lights
         this.setupLights();
@@ -115,11 +144,262 @@ class SimpleCity {
         // Create buildings
         this.createBuildings();
 
+        // Initialize weather
+        this.initWeather();
+
         // Handle window resize
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
         // Start animation loop
         this.animate();
+    }
+
+    initSky() {
+        // Create sky
+        const skyGeometry = new THREE.SphereGeometry(400, 32, 32);
+        const skyMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                topColor: { value: new THREE.Color(0x0077ff) },
+                bottomColor: { value: new THREE.Color(0xffffff) },
+                offset: { value: 400 },
+                exponent: { value: 0.6 }
+            },
+            vertexShader: `
+                varying vec3 vWorldPosition;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vWorldPosition = worldPosition.xyz;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 topColor;
+                uniform vec3 bottomColor;
+                uniform float offset;
+                uniform float exponent;
+                varying vec3 vWorldPosition;
+                void main() {
+                    float h = normalize(vWorldPosition + offset).y;
+                    gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+                }
+            `,
+            side: THREE.BackSide
+        });
+
+        const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+        this.skyGroup.add(sky);
+
+        // Create sun
+        const sunGeometry = new THREE.SphereGeometry(5, 32, 32);
+        const sunMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffff00,
+            transparent: true,
+            opacity: 0.8
+        });
+        this.sun = new THREE.Mesh(sunGeometry, sunMaterial);
+        this.skyGroup.add(this.sun);
+
+        // Create moon
+        const moonGeometry = new THREE.SphereGeometry(3, 32, 32);
+        const moonMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.8
+        });
+        this.moon = new THREE.Mesh(moonGeometry, moonMaterial);
+        this.skyGroup.add(this.moon);
+
+        // Update sky colors and positions
+        this.updateSky();
+    }
+
+    updateSky() {
+        const time = this.sky.time;
+        const dayTime = time > 0.25 && time < 0.75;
+
+        // Update sky colors
+        const skyMaterial = this.skyGroup.children[0].material;
+        if (dayTime) {
+            // Day colors
+            skyMaterial.uniforms.topColor.value.setHex(0x0077ff);
+            skyMaterial.uniforms.bottomColor.value.setHex(0xffffff);
+        } else {
+            // Night colors
+            skyMaterial.uniforms.topColor.value.setHex(0x000033);
+            skyMaterial.uniforms.bottomColor.value.setHex(0x000066);
+        }
+
+        // Update sun and moon positions
+        const angle = time * Math.PI * 2;
+        const radius = 300;
+        
+        // Sun position
+        this.sun.position.x = Math.cos(angle) * radius;
+        this.sun.position.y = Math.sin(angle) * radius;
+        this.sun.position.z = 0;
+        this.sun.visible = dayTime;
+
+        // Moon position (opposite to sun)
+        this.moon.position.x = Math.cos(angle + Math.PI) * radius;
+        this.moon.position.y = Math.sin(angle + Math.PI) * radius;
+        this.moon.position.z = 0;
+        this.moon.visible = !dayTime;
+
+        // Update lighting
+        this.updateLighting(time);
+    }
+
+    updateLighting(time) {
+        const dayTime = time > 0.25 && time < 0.75;
+        const intensity = dayTime ? 1.0 : 0.2;
+
+        // Update ambient light
+        this.scene.children.forEach(child => {
+            if (child instanceof THREE.AmbientLight) {
+                child.intensity = intensity * 0.5;
+            }
+            if (child instanceof THREE.DirectionalLight) {
+                child.intensity = intensity;
+                // Update sun direction
+                if (dayTime) {
+                    const angle = time * Math.PI * 2;
+                    child.position.x = Math.cos(angle) * 100;
+                    child.position.y = Math.sin(angle) * 100;
+                    child.position.z = 0;
+                }
+            }
+        });
+    }
+
+    setTime(time) {
+        this.sky.time = Math.max(0, Math.min(1, time));
+        this.updateSky();
+    }
+
+    initWeather() {
+        // Create rain particles
+        const rainGeometry = new THREE.BufferGeometry();
+        const rainCount = 1000;
+        const positions = new Float32Array(rainCount * 3);
+        const velocities = new Float32Array(rainCount * 3);
+
+        for (let i = 0; i < rainCount; i++) {
+            positions[i * 3] = (Math.random() - 0.5) * 50;
+            positions[i * 3 + 1] = Math.random() * 30;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 50;
+            
+            velocities[i * 3] = 0;
+            velocities[i * 3 + 1] = -0.5 - Math.random() * 0.5;
+            velocities[i * 3 + 2] = 0;
+        }
+
+        rainGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        rainGeometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
+
+        const rainMaterial = new THREE.PointsMaterial({
+            color: 0xaaaaaa,
+            size: 0.1,
+            transparent: true,
+            opacity: 0.6
+        });
+
+        this.rainParticles = new THREE.Points(rainGeometry, rainMaterial);
+        this.rainParticles.visible = false;
+        this.weatherGroup.add(this.rainParticles);
+
+        // Create fog
+        this.scene.fog = new THREE.FogExp2(0xcccccc, 0.0);
+    }
+
+    setWeather(type, intensity = 0.5) {
+        this.weather.type = type;
+        this.weather.intensity = intensity;
+        this.weather.isActive = type !== 'clear';
+
+        switch(type) {
+            case 'rain':
+                this.rainParticles.visible = true;
+                this.scene.fog.density = 0.01 * intensity;
+                this.adjustLightingForWeather(0.7);
+                break;
+            case 'fog':
+                this.rainParticles.visible = false;
+                this.scene.fog.density = 0.02 * intensity;
+                this.adjustLightingForWeather(0.8);
+                break;
+            case 'clear':
+                this.rainParticles.visible = false;
+                this.scene.fog.density = 0.0;
+                this.adjustLightingForWeather(1.0);
+                break;
+        }
+    }
+
+    adjustLightingForWeather(intensity) {
+        // Adjust ambient light
+        this.scene.children.forEach(child => {
+            if (child instanceof THREE.AmbientLight) {
+                child.intensity = intensity;
+            }
+            if (child instanceof THREE.DirectionalLight) {
+                child.intensity = intensity * 1.5;
+            }
+        });
+    }
+
+    updateWeather() {
+        if (!this.weather.isActive) return;
+
+        if (this.weather.type === 'rain') {
+            const positions = this.rainParticles.geometry.attributes.position.array;
+            const velocities = this.rainParticles.geometry.attributes.velocity.array;
+
+            for (let i = 0; i < positions.length; i += 3) {
+                positions[i + 1] += velocities[i + 1] * this.weather.intensity;
+
+                // Reset particles that fall below ground
+                if (positions[i + 1] < 0) {
+                    positions[i] = (Math.random() - 0.5) * 50;
+                    positions[i + 1] = 30;
+                    positions[i + 2] = (Math.random() - 0.5) * 50;
+                }
+            }
+
+            this.rainParticles.geometry.attributes.position.needsUpdate = true;
+        }
+    }
+
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        this.controls.update();
+        this.updateWeather();
+        
+        // Slowly update time for day/night cycle
+        this.sky.time = (this.sky.time + 0.0001) % 1;
+        this.updateSky();
+        
+        this.renderer.render(this.scene, this.camera);
+    }
+
+    // Add weather control methods
+    toggleRain() {
+        if (this.weather.type === 'rain') {
+            this.setWeather('clear');
+        } else {
+            this.setWeather('rain', this.weather.intensity);
+        }
+    }
+
+    toggleFog() {
+        if (this.weather.type === 'fog') {
+            this.setWeather('clear');
+        } else {
+            this.setWeather('fog', this.weather.intensity);
+        }
+    }
+
+    setWeatherIntensity(intensity) {
+        this.setWeather(this.weather.type, intensity);
     }
 
     setupLights() {
@@ -1230,12 +1510,6 @@ class SimpleCity {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-    }
-
-    animate() {
-        requestAnimationFrame(() => this.animate());
-        this.controls.update();
-        this.renderer.render(this.scene, this.camera);
     }
 
     createStreetElements() {
