@@ -1,3 +1,4 @@
+console.log('main.js script started');
 import './style.css'
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
@@ -25,20 +26,20 @@ const cameraSettings = {
 
 // Initialize the game
 function init() {
+    console.log('init() function called');
     // Create loading manager
     loadingManager = new THREE.LoadingManager();
+    
+    // Since no assets are explicitly loaded, the manager is immediately ready.
+    // Manually trigger the initialization steps.
+    console.log('Setting isGameInitialized to true and hiding loading screen immediately.');
+    document.querySelector('.loading').style.display = 'none';
+    isGameInitialized = true;
+
+    // Keep onLoad for potential future use (e.g., loading models, textures)
     loadingManager.onLoad = () => {
-        // Add a slight delay to make the loading screen transition visible
-        setTimeout(() => {
-            document.querySelector('.loading').style.display = 'none';
-            isGameInitialized = true;
-
-            // Add a border to the renderer's canvas for debugging
-            if (renderer && renderer.domElement) {
-                renderer.domElement.style.border = '2px solid red';
-            }
-
-        }, 500); // 500ms delay
+        console.log('Loading complete (onLoad callback, should not happen if no assets).');
+        // The loading screen is already hidden, this is just a confirmation log.
     };
 
     // Create scene
@@ -57,7 +58,11 @@ function init() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
+    console.log('Renderer DOM Element:', renderer.domElement);
     document.body.appendChild(renderer.domElement);
+    
+    // Ensure the canvas is on top
+    renderer.domElement.style.zIndex = '1001';
 
     // Create physics world
     world = new CANNON.World({
@@ -274,9 +279,15 @@ function updateCamera() {
 
 // Animation loop
 function animate() {
+    console.log('animate() called');
     requestAnimationFrame(animate);
 
-    if (!isGameInitialized) return;
+    if (!isGameInitialized) {
+        console.log('Game not initialized, returning from animate.');
+        return;
+    }
+
+    console.log('Game initialized, continuing animate loop.');
 
     const deltaTime = clock.getDelta();
 
