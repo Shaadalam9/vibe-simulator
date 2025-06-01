@@ -15,8 +15,8 @@ export class Terrain {
         this.chunkSize = 500;
         this.roadWidth = 6;
         this.roadSegments = [];
-        this.roadLength = 2000;
-        this.roadCurvature = 0.2;
+        this.roadLength = 4000;
+        this.roadCurvature = 0.15;
         
         this.createInitialTerrain();
         this.generateRoadPath();
@@ -24,8 +24,8 @@ export class Terrain {
 
     createInitialTerrain() {
         // Create initial chunks around origin
-        for (let x = -1; x <= 1; x++) {
-            for (let z = -1; z <= 1; z++) {
+        for (let x = -2; x <= 2; x++) {
+            for (let z = -2; z <= 2; z++) {
                 this.createChunk(x, z);
             }
         }
@@ -40,11 +40,11 @@ export class Terrain {
 
         for (let i = 0; i < this.roadLength; i += 5) {
             // Combine multiple sine waves for more natural curves
-            const curve1 = Math.sin(i * 0.005) * 200;
-            const curve2 = Math.sin(i * 0.01) * 100;
-            const curve3 = Math.sin(i * 0.002) * 300;
+            const curve1 = Math.sin(i * 0.002) * 300;
+            const curve2 = Math.sin(i * 0.005) * 150;
+            const curve3 = Math.sin(i * 0.001) * 400;
             
-            angle += (curve1 + curve2 + curve3) * 0.0005;
+            angle += (curve1 + curve2 + curve3) * 0.0003;
             x += Math.sin(angle) * 5;
             z += Math.cos(angle) * 5;
 
@@ -84,7 +84,7 @@ export class Terrain {
             
             // Add road influence
             const roadInfluence = this.getRoadInfluence(x, z);
-            height = height * (1 - roadInfluence) + roadInfluence * 0;
+            height = height * (1 - roadInfluence) + roadInfluence * 0.1;
             
             vertices[i + 1] = height;
         }
@@ -93,7 +93,7 @@ export class Terrain {
 
         // Create terrain material with grass texture
         const material = new THREE.MeshStandardMaterial({
-            color: 0x4a7c59,
+            color: 0x8FBC8F, // Darker Sea Green - closer to screenshot grass
             roughness: 0.9,
             metalness: 0.1,
             flatShading: false
@@ -106,6 +106,9 @@ export class Terrain {
 
         // Create road mesh with improved geometry
         this.createRoadMesh(chunkX, chunkZ);
+
+        // Create guardrails
+        this.createGuardrails(chunkX, chunkZ);
 
         // Create physics body
         const shape = new CANNON.Heightfield(
@@ -188,7 +191,7 @@ export class Terrain {
 
         // Create road material with texture
         const roadMaterial = new THREE.MeshStandardMaterial({
-            color: 0x2c2c2c,
+            color: 0x555555, // Slightly lighter road color
             roughness: 0.8,
             metalness: 0.1,
             map: this.createRoadTexture()
@@ -206,35 +209,123 @@ export class Terrain {
         const ctx = canvas.getContext('2d');
 
         // Draw road base
-        ctx.fillStyle = '#2c2c2c';
+        ctx.fillStyle = '#555555';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw road markings
+        // Draw dashed road markings
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([30, 30]);
+        ctx.lineWidth = 5; // Thicker dashed markings
+        ctx.setLineDash([50, 50]); // Longer dashes
         ctx.beginPath();
         ctx.moveTo(0, canvas.height/2);
         ctx.lineTo(canvas.width, canvas.height/2);
         ctx.stroke();
 
-        // Add road edge lines
+        // Add solid road edge lines
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 4; // Thicker edge lines
         ctx.setLineDash([]);
         ctx.beginPath();
-        ctx.moveTo(0, canvas.height/4);
-        ctx.lineTo(canvas.width, canvas.height/4);
+        ctx.moveTo(0, canvas.height * 0.05); // Closer to edge
+        ctx.lineTo(canvas.width, canvas.height * 0.05);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(0, canvas.height*3/4);
-        ctx.lineTo(canvas.width, canvas.height*3/4);
+        ctx.moveTo(0, canvas.height * 0.95); // Closer to edge
+        ctx.lineTo(canvas.width, canvas.height * 0.95);
         ctx.stroke();
 
         const texture = new THREE.CanvasTexture(canvas);
         texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(1, 20);
+        texture.repeat.set(1, 60); // Even more road texture repetition
         return texture;
+    }
+
+    createGuardrails(chunkX, chunkZ) {
+        const chunkStartX = chunkX * this.chunkSize;
+        const chunkStartZ = chunkZ * this.chunkSize;
+        const chunkEndX = chunkStartX + this.chunkSize;
+        const chunkEndZ = chunkStartZ + this.chunkSize;
+
+        const relevantSegments = this.roadSegments.filter(segment => {
+            return segment.position.x >= chunkStartX - 10 && 
+                   segment.position.x <= chunkEndX + 10 &&
+                   segment.position.z >= chunkStartZ - 10 && 
+                   segment.position.z <= chunkEndZ + 10;
+        });
+
+        if (relevantSegments.length < 2) return; // Need at least two segments to create a rail
+
+        const guardrailMaterial = new THREE.MeshStandardMaterial({
+            color: 0xAAAAAA, // Lighter gray color
+            roughness: 0.6,
+            metalness: 0.7
+        });
+
+        const postGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8); // Shorter posts
+        const railGeometry = new THREE.BoxGeometry(0.15, 0.15, 1); // Thinner rail
+
+        // Generate guardrails along the relevant road segments
+        for (let i = 0; i < relevantSegments.length - 1; i++) {
+            const current = relevantSegments[i];
+            const next = relevantSegments[i + 1];
+
+            const segmentDirection = new THREE.Vector3().subVectors(next.position, current.position).normalize();
+            const segmentLength = current.position.distanceTo(next.position);
+
+            // Create posts along the segment
+            const numPosts = Math.max(2, Math.floor(segmentLength / 4)); // More frequent posts
+            for (let j = 0; j < numPosts; j++) {
+                const t = j / (numPosts - 1);
+                const postPosition = current.position.clone().lerp(next.position, t);
+
+                // Calculate the position offset from the road center
+                const perpendicular = new THREE.Vector3(-segmentDirection.z, 0, segmentDirection.x);
+
+                // Left side guardrail post
+                const leftPostPos = postPosition.clone().add(perpendicular.clone().multiplyScalar(this.roadWidth / 2 + 0.3));
+                leftPostPos.y = this.getTerrainHeight(leftPostPos.x, leftPostPos.z) + 0.4; // Position post on terrain
+                const leftPostMesh = new THREE.Mesh(postGeometry, guardrailMaterial);
+                leftPostMesh.position.copy(leftPostPos);
+                this.scene.add(leftPostMesh);
+
+                // Right side guardrail post
+                const rightPostPos = postPosition.clone().add(perpendicular.clone().multiplyScalar(-(this.roadWidth / 2 + 0.3)));
+                rightPostPos.y = this.getTerrainHeight(rightPostPos.x, rightPostPos.z) + 0.4; // Position post on terrain
+                const rightPostMesh = new THREE.Mesh(postGeometry, guardrailMaterial);
+                rightPostMesh.position.copy(rightPostPos);
+                this.scene.add(rightPostMesh);
+            }
+
+            // Create rail between posts (simplified - could be a single mesh per segment)
+            const railHeight = 0.7; // Height of the rail above the terrain
+            const railOffset = this.roadWidth / 2 + 0.3;
+
+            const startPosLeft = current.position.clone().add(new THREE.Vector3(-segmentDirection.z, 0, segmentDirection.x).multiplyScalar(railOffset));
+            startPosLeft.y = this.getTerrainHeight(startPosLeft.x, startPosLeft.z) + railHeight;
+            const endPosLeft = next.position.clone().add(new THREE.Vector3(-segmentDirection.z, 0, segmentDirection.x).multiplyScalar(railOffset));
+            endPosLeft.y = this.getTerrainHeight(endPosLeft.x, endPosLeft.z) + railHeight;
+
+            const leftRailGeom = new THREE.BoxGeometry(0.15, 0.15, startPosLeft.distanceTo(endPosLeft));
+            const leftRailMesh = new THREE.Mesh(leftRailGeom, guardrailMaterial);
+            leftRailMesh.position.copy(startPosLeft.clone().lerp(endPosLeft, 0.5));
+            leftRailMesh.lookAt(endPosLeft);
+            leftRailMesh.rotateY(Math.PI / 2); // Align along the segment
+            this.scene.add(leftRailMesh);
+
+            const startPosRight = current.position.clone().add(new THREE.Vector3(segmentDirection.z, 0, -segmentDirection.x).multiplyScalar(railOffset));
+            startPosRight.y = this.getTerrainHeight(startPosRight.x, startPosRight.z) + railHeight;
+            const endPosRight = next.position.clone().add(new THREE.Vector3(segmentDirection.z, 0, -segmentDirection.x).multiplyScalar(railOffset));
+            endPosRight.y = this.getTerrainHeight(endPosRight.x, endPosRight.z) + railHeight;
+
+            const rightRailGeom = new THREE.BoxGeometry(0.15, 0.15, startPosRight.distanceTo(endPosRight));
+            const rightRailMesh = new THREE.Mesh(rightRailGeom, guardrailMaterial);
+            rightRailMesh.position.copy(startPosRight.clone().lerp(endPosRight, 0.5));
+            rightRailMesh.lookAt(endPosRight);
+            rightRailMesh.rotateY(Math.PI / 2); // Align along the segment
+            this.scene.add(rightRailMesh);
+
+        }
+
     }
 
     getRoadInfluence(x, z) {
@@ -250,7 +341,7 @@ export class Terrain {
             if (dist < minDist) {
                 minDist = dist;
                 // Calculate influence based on distance with smoother falloff
-                influence = Math.max(0, 1 - Math.pow(dist / this.roadWidth, 2));
+                influence = Math.max(0, 1 - Math.pow(dist / (this.roadWidth * 1.5), 1.5)); // Adjusted influence area and falloff
             }
         }
 
@@ -272,12 +363,27 @@ export class Terrain {
                 height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.125;
                 
                 const roadInfluence = this.getRoadInfluence(x, z);
-                height = height * (1 - roadInfluence) + roadInfluence * 0;
+                height = height * (1 - roadInfluence) + roadInfluence * 0.1;
                 
                 data[i][j] = height;
             }
         }
         return data;
+    }
+
+     getTerrainHeight(x, z) {
+        // Find the height of the terrain at a specific (x, z) coordinate
+        // This is a simplified approach and may need refinement for accuracy
+        let height = 0;
+        height += this.noise(x * 0.0005, z * 0.0005) * this.heightScale;
+        height += this.noise(x * 0.001, z * 0.001) * this.heightScale * 0.5;
+        height += this.noise(x * 0.002, z * 0.002) * this.heightScale * 0.25;
+        height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.125;
+
+        const roadInfluence = this.getRoadInfluence(x, z);
+        height = height * (1 - roadInfluence) + roadInfluence * 0.1;
+
+        return height;
     }
 
     update(carPosition) {
@@ -286,8 +392,8 @@ export class Terrain {
         const chunkZ = Math.floor(carPosition.z / this.chunkSize);
         
         // Create new chunks as needed
-        for (let x = chunkX - 1; x <= chunkX + 1; x++) {
-            for (let z = chunkZ - 1; z <= chunkZ + 1; z++) {
+        for (let x = chunkX - 2; x <= chunkX + 2; x++) {
+            for (let z = chunkZ - 2; z <= chunkZ + 2; z++) {
                 this.createChunk(x, z);
             }
         }
@@ -295,7 +401,7 @@ export class Terrain {
         // Remove chunks that are too far away
         for (const key of this.activeChunks) {
             const [x, z] = key.split(',').map(Number);
-            if (Math.abs(x - chunkX) > 2 || Math.abs(z - chunkZ) > 2) {
+            if (Math.abs(x - chunkX) > 3 || Math.abs(z - chunkZ) > 3) {
                 const chunk = this.chunks.get(key);
                 this.scene.remove(chunk.mesh);
                 this.world.removeBody(chunk.body);
