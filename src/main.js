@@ -1,32 +1,8 @@
 import './style.css'
-import javascriptLogo from './javascript.svg'
-import viteLogo from '/vite.svg'
-import { setupCounter } from './counter.js'
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es/dist/cannon-es.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Car } from './Car.js';
 import { Terrain } from './Terrain.js';
-
-document.querySelector('#app').innerHTML = `
-  <div>
-    <a href="https://vite.dev" target="_blank">
-      <img src="${viteLogo}" class="logo" alt="Vite logo" />
-    </a>
-    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript" target="_blank">
-      <img src="${javascriptLogo}" class="logo vanilla" alt="JavaScript logo" />
-    </a>
-    <h1>Hello Vite!</h1>
-    <div class="card">
-      <button id="counter" type="button"></button>
-    </div>
-    <p class="read-the-docs">
-      Click on the Vite logo to learn more
-    </p>
-  </div>
-`
-
-setupCounter(document.querySelector('#counter'))
 
 let scene, camera, renderer;
 let car, terrain;
@@ -34,10 +10,18 @@ let world;
 let clock;
 let sky;
 let sun;
-let timeOfDay = 0.5; // 0 to 1, representing time of day
-let timeSpeed = 0.1; // Speed of time progression
+let timeOfDay = 0.5;
+let timeSpeed = 0.1;
 let loadingManager;
 let isGameInitialized = false;
+
+// Camera settings
+const cameraSettings = {
+    distance: 8,
+    height: 3,
+    lookAhead: 20,
+    smoothness: 0.1
+};
 
 // Initialize the game
 function init() {
@@ -259,6 +243,26 @@ function updateTimeOfDay() {
     }
 }
 
+// Update camera position
+function updateCamera() {
+    // Calculate target position
+    const carPosition = car.mesh.position.clone();
+    const carDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(car.mesh.quaternion);
+    
+    // Calculate look-ahead point
+    const lookAheadPoint = carPosition.clone().add(carDirection.multiplyScalar(cameraSettings.lookAhead));
+    
+    // Calculate camera position
+    const cameraOffset = new THREE.Vector3(0, cameraSettings.height, -cameraSettings.distance);
+    cameraOffset.applyQuaternion(car.mesh.quaternion);
+    
+    // Smoothly move camera
+    camera.position.lerp(carPosition.clone().add(cameraOffset), cameraSettings.smoothness);
+    
+    // Look at the look-ahead point
+    camera.lookAt(lookAheadPoint);
+}
+
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
@@ -279,11 +283,8 @@ function animate() {
     // Update terrain
     terrain.update(car.mesh.position);
 
-    // Update camera to follow car
-    const cameraOffset = new THREE.Vector3(0, 5, -10);
-    cameraOffset.applyQuaternion(car.mesh.quaternion);
-    camera.position.copy(car.mesh.position).add(cameraOffset);
-    camera.lookAt(car.mesh.position);
+    // Update camera
+    updateCamera();
 
     // Render scene
     renderer.render(scene, camera);
