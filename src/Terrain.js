@@ -7,15 +7,15 @@ export class Terrain {
         this.world = world;
         this.size = 1000;
         this.resolution = 128;
-        this.heightScale = 50;
+        this.heightScale = 30;
         this.noise = createNoise2D();
         this.chunks = new Map();
         this.activeChunks = new Set();
         this.chunkSize = 500;
-        this.roadWidth = 8;
+        this.roadWidth = 6;
         this.roadSegments = [];
-        this.roadLength = 1000;
-        this.roadCurvature = 0.3;
+        this.roadLength = 2000;
+        this.roadCurvature = 0.2;
         
         this.createInitialTerrain();
         this.generateRoadPath();
@@ -37,15 +37,15 @@ export class Terrain {
         let z = 0;
         let angle = 0;
 
-        for (let i = 0; i < this.roadLength; i += 10) {
+        for (let i = 0; i < this.roadLength; i += 5) {
             // Combine multiple sine waves for more natural curves
-            const curve1 = Math.sin(i * 0.01) * 100;
-            const curve2 = Math.sin(i * 0.02) * 50;
-            const curve3 = Math.sin(i * 0.005) * 150;
+            const curve1 = Math.sin(i * 0.005) * 200;
+            const curve2 = Math.sin(i * 0.01) * 100;
+            const curve3 = Math.sin(i * 0.002) * 300;
             
-            angle += (curve1 + curve2 + curve3) * 0.001;
-            x += Math.sin(angle) * 10;
-            z += Math.cos(angle) * 10;
+            angle += (curve1 + curve2 + curve3) * 0.0005;
+            x += Math.sin(angle) * 5;
+            z += Math.cos(angle) * 5;
 
             segments.push({
                 position: new THREE.Vector3(x, 0, z),
@@ -76,10 +76,10 @@ export class Terrain {
             
             // Generate terrain height with multiple noise layers
             let height = 0;
-            height += this.noise(x * 0.001, z * 0.001) * this.heightScale;
-            height += this.noise(x * 0.002, z * 0.002) * this.heightScale * 0.5;
-            height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.25;
-            height += this.noise(x * 0.008, z * 0.008) * this.heightScale * 0.125;
+            height += this.noise(x * 0.0005, z * 0.0005) * this.heightScale;
+            height += this.noise(x * 0.001, z * 0.001) * this.heightScale * 0.5;
+            height += this.noise(x * 0.002, z * 0.002) * this.heightScale * 0.25;
+            height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.125;
             
             // Add road influence
             const roadInfluence = this.getRoadInfluence(x, z);
@@ -92,8 +92,8 @@ export class Terrain {
 
         // Create terrain material with grass texture
         const material = new THREE.MeshStandardMaterial({
-            color: 0x3a7e1a,
-            roughness: 0.8,
+            color: 0x4a7c59,
+            roughness: 0.9,
             metalness: 0.1,
             flatShading: false
         });
@@ -187,8 +187,8 @@ export class Terrain {
 
         // Create road material with texture
         const roadMaterial = new THREE.MeshStandardMaterial({
-            color: 0x333333,
-            roughness: 0.9,
+            color: 0x2c2c2c,
+            roughness: 0.8,
             metalness: 0.1,
             map: this.createRoadTexture()
         });
@@ -205,21 +205,34 @@ export class Terrain {
         const ctx = canvas.getContext('2d');
 
         // Draw road base
-        ctx.fillStyle = '#333333';
+        ctx.fillStyle = '#2c2c2c';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // Draw road markings
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 4;
-        ctx.setLineDash([20, 20]);
+        ctx.lineWidth = 3;
+        ctx.setLineDash([30, 30]);
         ctx.beginPath();
         ctx.moveTo(0, canvas.height/2);
         ctx.lineTo(canvas.width, canvas.height/2);
         ctx.stroke();
 
+        // Add road edge lines
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height/4);
+        ctx.lineTo(canvas.width, canvas.height/4);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height*3/4);
+        ctx.lineTo(canvas.width, canvas.height*3/4);
+        ctx.stroke();
+
         const texture = new THREE.CanvasTexture(canvas);
         texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(1, 10);
+        texture.repeat.set(1, 20);
         return texture;
     }
 
@@ -235,8 +248,8 @@ export class Terrain {
             
             if (dist < minDist) {
                 minDist = dist;
-                // Calculate influence based on distance
-                influence = Math.max(0, 1 - dist / this.roadWidth);
+                // Calculate influence based on distance with smoother falloff
+                influence = Math.max(0, 1 - Math.pow(dist / this.roadWidth, 2));
             }
         }
 
@@ -252,10 +265,10 @@ export class Terrain {
                 const z = (j / this.resolution - 0.5) * this.chunkSize + chunkZ * this.chunkSize;
                 
                 let height = 0;
-                height += this.noise(x * 0.001, z * 0.001) * this.heightScale;
-                height += this.noise(x * 0.002, z * 0.002) * this.heightScale * 0.5;
-                height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.25;
-                height += this.noise(x * 0.008, z * 0.008) * this.heightScale * 0.125;
+                height += this.noise(x * 0.0005, z * 0.0005) * this.heightScale;
+                height += this.noise(x * 0.001, z * 0.001) * this.heightScale * 0.5;
+                height += this.noise(x * 0.002, z * 0.002) * this.heightScale * 0.25;
+                height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.125;
                 
                 const roadInfluence = this.getRoadInfluence(x, z);
                 height = height * (1 - roadInfluence) + roadInfluence * 0;
