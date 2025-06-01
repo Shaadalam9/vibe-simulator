@@ -6,16 +6,21 @@ export class Car {
         this.scene = scene;
         this.world = world;
         this.speed = 0;
-        this.maxSpeed = 50;
-        this.acceleration = 0.5;
-        this.deceleration = 0.3;
+        this.maxSpeed = 30; // Reduced for more realistic speeds
+        this.acceleration = 0.3;
+        this.deceleration = 0.2;
+        this.brakeForce = 0.5;
         this.steeringAngle = 0;
         this.maxSteeringAngle = Math.PI / 4;
-        this.steeringSpeed = 0.03;
+        this.steeringSpeed = 0.02;
         this.steeringReturn = 0.05;
         this.wheelBase = 2.5;
         this.wheelTrack = 1.8;
         this.wheelRadius = 0.4;
+        this.handbrake = false;
+        this.driftFactor = 0.95;
+        this.groundFriction = 0.3;
+        this.airFriction = 0.1;
 
         this.setupPhysics();
         this.createCarModel();
@@ -161,6 +166,22 @@ export class Car {
         rightSpot.distance = 50;
         rightSpot.castShadow = true;
         this.mesh.add(rightSpot);
+
+        // Add brake lights
+        const brakeLightGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+        const brakeLightMaterial = new THREE.MeshPhongMaterial({
+            color: 0xff0000,
+            emissive: 0xff0000,
+            emissiveIntensity: 0.5
+        });
+
+        const leftBrakeLight = new THREE.Mesh(brakeLightGeometry, brakeLightMaterial);
+        leftBrakeLight.position.set(-0.7, 0, -2.2);
+        this.mesh.add(leftBrakeLight);
+
+        const rightBrakeLight = new THREE.Mesh(brakeLightGeometry, brakeLightMaterial);
+        rightBrakeLight.position.set(0.7, 0, -2.2);
+        this.mesh.add(rightBrakeLight);
     }
 
     update(deltaTime, controls) {
@@ -171,6 +192,26 @@ export class Car {
             this.speed = Math.max(this.speed - this.acceleration, -this.maxSpeed / 2);
         } else {
             this.speed *= (1 - this.deceleration);
+        }
+
+        // Handle braking
+        if (controls.brake) {
+            this.speed *= (1 - this.brakeForce);
+            // Activate brake lights
+            this.wheelMeshes[2].material.emissive.set(0xff0000);
+            this.wheelMeshes[3].material.emissive.set(0xff0000);
+        } else {
+            // Deactivate brake lights
+            this.wheelMeshes[2].material.emissive.set(0x000000);
+            this.wheelMeshes[3].material.emissive.set(0x000000);
+        }
+
+        // Handle handbrake
+        if (controls.handbrake) {
+            this.handbrake = true;
+            this.speed *= this.driftFactor;
+        } else {
+            this.handbrake = false;
         }
 
         // Handle steering with improved physics
@@ -187,11 +228,18 @@ export class Car {
         force.applyQuaternion(this.body.quaternion);
         this.body.applyLocalForce(force, new CANNON.Vec3(0, 0, 0));
 
-        // Apply steering
+        // Apply steering with improved handling
         if (Math.abs(this.speed) > 0.1) {
             const steeringForce = new CANNON.Vec3(0, this.steeringAngle * this.speed * 0.1, 0);
+            if (this.handbrake) {
+                steeringForce.multiply(1.5); // Increased steering during drift
+            }
             this.body.applyLocalTorque(steeringForce);
         }
+
+        // Apply friction
+        const friction = this.handbrake ? this.airFriction : this.groundFriction;
+        this.body.velocity.multiply(1 - friction);
 
         // Update wheel rotations
         this.wheelMeshes.forEach((wheel, index) => {

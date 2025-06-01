@@ -12,9 +12,13 @@ export class Terrain {
         this.chunks = new Map();
         this.activeChunks = new Set();
         this.chunkSize = 500;
-        this.roadWidth = 10;
+        this.roadWidth = 8;
+        this.roadSegments = [];
+        this.roadLength = 1000;
+        this.roadCurvature = 0.3;
         
         this.createInitialTerrain();
+        this.generateRoadPath();
     }
 
     createInitialTerrain() {
@@ -24,6 +28,32 @@ export class Terrain {
                 this.createChunk(x, z);
             }
         }
+    }
+
+    generateRoadPath() {
+        // Generate a more natural road path using multiple sine waves
+        const segments = [];
+        let x = 0;
+        let z = 0;
+        let angle = 0;
+
+        for (let i = 0; i < this.roadLength; i += 10) {
+            // Combine multiple sine waves for more natural curves
+            const curve1 = Math.sin(i * 0.01) * 100;
+            const curve2 = Math.sin(i * 0.02) * 50;
+            const curve3 = Math.sin(i * 0.005) * 150;
+            
+            angle += (curve1 + curve2 + curve3) * 0.001;
+            x += Math.sin(angle) * 10;
+            z += Math.cos(angle) * 10;
+
+            segments.push({
+                position: new THREE.Vector3(x, 0, z),
+                angle: angle
+            });
+        }
+
+        this.roadSegments = segments;
     }
 
     createChunk(chunkX, chunkZ) {
@@ -44,11 +74,12 @@ export class Terrain {
             const x = vertices[i] + chunkX * this.chunkSize;
             const z = vertices[i + 2] + chunkZ * this.chunkSize;
             
-            // Generate terrain height
+            // Generate terrain height with multiple noise layers
             let height = 0;
             height += this.noise(x * 0.001, z * 0.001) * this.heightScale;
             height += this.noise(x * 0.002, z * 0.002) * this.heightScale * 0.5;
             height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.25;
+            height += this.noise(x * 0.008, z * 0.008) * this.heightScale * 0.125;
             
             // Add road influence
             const roadInfluence = this.getRoadInfluence(x, z);
@@ -72,18 +103,8 @@ export class Terrain {
         mesh.receiveShadow = true;
         this.scene.add(mesh);
 
-        // Create road mesh
-        const roadGeometry = new THREE.PlaneGeometry(this.roadWidth, this.chunkSize);
-        const roadMaterial = new THREE.MeshStandardMaterial({
-            color: 0x333333,
-            roughness: 0.9,
-            metalness: 0.1
-        });
-        const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
-        roadMesh.rotation.x = -Math.PI / 2;
-        roadMesh.position.set(chunkX * this.chunkSize, 0.1, chunkZ * this.chunkSize);
-        roadMesh.receiveShadow = true;
-        this.scene.add(roadMesh);
+        // Create road mesh with improved geometry
+        this.createRoadMesh(chunkX, chunkZ);
 
         // Create physics body
         const shape = new CANNON.Heightfield(
@@ -104,15 +125,122 @@ export class Terrain {
         );
         this.world.addBody(body);
 
-        this.chunks.set(chunkKey, { mesh, roadMesh, body });
+        this.chunks.set(chunkKey, { mesh, body });
         this.activeChunks.add(chunkKey);
     }
 
+    createRoadMesh(chunkX, chunkZ) {
+        const chunkStartX = chunkX * this.chunkSize;
+        const chunkStartZ = chunkZ * this.chunkSize;
+        const chunkEndX = chunkStartX + this.chunkSize;
+        const chunkEndZ = chunkStartZ + this.chunkSize;
+
+        // Find road segments that intersect with this chunk
+        const relevantSegments = this.roadSegments.filter(segment => {
+            return segment.position.x >= chunkStartX && 
+                   segment.position.x <= chunkEndX &&
+                   segment.position.z >= chunkStartZ && 
+                   segment.position.z <= chunkEndZ;
+        });
+
+        if (relevantSegments.length === 0) return;
+
+        // Create road geometry
+        const roadGeometry = new THREE.BufferGeometry();
+        const vertices = [];
+        const indices = [];
+        const uvs = [];
+
+        for (let i = 0; i < relevantSegments.length - 1; i++) {
+            const current = relevantSegments[i];
+            const next = relevantSegments[i + 1];
+
+            // Calculate road width offset
+            const offset = new THREE.Vector2(
+                Math.cos(current.angle + Math.PI/2),
+                Math.sin(current.angle + Math.PI/2)
+            ).multiplyScalar(this.roadWidth/2);
+
+            // Add vertices for road segment
+            const baseIndex = vertices.length / 3;
+            vertices.push(
+                current.position.x + offset.x, 0.1, current.position.z + offset.y,
+                current.position.x - offset.x, 0.1, current.position.z - offset.y,
+                next.position.x + offset.x, 0.1, next.position.z + offset.y,
+                next.position.x - offset.x, 0.1, next.position.z - offset.y
+            );
+
+            // Add indices for two triangles
+            indices.push(
+                baseIndex, baseIndex + 1, baseIndex + 2,
+                baseIndex + 1, baseIndex + 3, baseIndex + 2
+            );
+
+            // Add UVs
+            uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+        }
+
+        roadGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        roadGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        roadGeometry.setIndex(indices);
+        roadGeometry.computeVertexNormals();
+
+        // Create road material with texture
+        const roadMaterial = new THREE.MeshStandardMaterial({
+            color: 0x333333,
+            roughness: 0.9,
+            metalness: 0.1,
+            map: this.createRoadTexture()
+        });
+
+        const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
+        roadMesh.receiveShadow = true;
+        this.scene.add(roadMesh);
+    }
+
+    createRoadTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+
+        // Draw road base
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw road markings
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.setLineDash([20, 20]);
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height/2);
+        ctx.lineTo(canvas.width, canvas.height/2);
+        ctx.stroke();
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(1, 10);
+        return texture;
+    }
+
     getRoadInfluence(x, z) {
-        // Create a winding road using sine waves
-        const roadX = Math.sin(z * 0.01) * 100;
-        const distance = Math.abs(x - roadX);
-        return Math.max(0, 1 - distance / this.roadWidth);
+        // Find nearest road segment
+        let minDist = Infinity;
+        let influence = 0;
+
+        for (const segment of this.roadSegments) {
+            const dx = x - segment.position.x;
+            const dz = z - segment.position.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            
+            if (dist < minDist) {
+                minDist = dist;
+                // Calculate influence based on distance
+                influence = Math.max(0, 1 - dist / this.roadWidth);
+            }
+        }
+
+        return influence;
     }
 
     generateHeightfieldData(chunkX, chunkZ) {
@@ -127,6 +255,7 @@ export class Terrain {
                 height += this.noise(x * 0.001, z * 0.001) * this.heightScale;
                 height += this.noise(x * 0.002, z * 0.002) * this.heightScale * 0.5;
                 height += this.noise(x * 0.004, z * 0.004) * this.heightScale * 0.25;
+                height += this.noise(x * 0.008, z * 0.008) * this.heightScale * 0.125;
                 
                 const roadInfluence = this.getRoadInfluence(x, z);
                 height = height * (1 - roadInfluence) + roadInfluence * 0;
@@ -155,7 +284,6 @@ export class Terrain {
             if (Math.abs(x - chunkX) > 2 || Math.abs(z - chunkZ) > 2) {
                 const chunk = this.chunks.get(key);
                 this.scene.remove(chunk.mesh);
-                this.scene.remove(chunk.roadMesh);
                 this.world.removeBody(chunk.body);
                 this.chunks.delete(key);
                 this.activeChunks.delete(key);
