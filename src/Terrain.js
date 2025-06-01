@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
+import * as CANNON from 'cannon-es';
 
 export class Terrain {
     constructor(scene, world) {

@@ -1,6 +1,6 @@
 import './style.css'
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es/dist/cannon-es.js';
+import * as CANNON from 'cannon-es';
 import { Car } from './Car.js';
 import { Terrain } from './Terrain.js';
 
