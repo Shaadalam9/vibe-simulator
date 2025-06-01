@@ -5,147 +5,156 @@ export class Car {
     constructor(scene, world) {
         this.scene = scene;
         this.world = world;
-        this.maxSteerVal = 0.5;
-        this.maxForce = 1000;
-        this.brakeForce = 1000000;
-        this.steeringSpeed = 0.03;
-        this.steeringResetSpeed = 0.1;
-        this.steeringVal = 0;
+        this.maxSteerVal = 0.5; // Maximum steering angle in radians
+        this.maxEngineForce = 1500; // Increased engine force for better acceleration
+        this.maxBrakeForce = 500000; // Adjusted brake force
+        this.steeringIncrement = 0.04; // Faster steering
+        this.steeringDecceleration = 0.1; // Slower steering return
         this.engineForce = 0;
-        this.breakingForce = 0;
+        this.brakeForce = 0;
+        this.steeringValue = 0; // Current steering value
+
+        // Wheel options for realistic behavior
         this.wheelOptions = {
-            radius: 0.5,
+            radius: 0.35, // Adjusted wheel radius
             directionLocal: new CANNON.Vec3(0, -1, 0),
-            suspensionStiffness: 30,
-            suspensionRestLength: 0.3,
-            frictionSlip: 5,
+            suspensionStiffness: 30, // Softer suspension
+            suspensionRestLength: 0.3, // Adjusted rest length
+            frictionSlip: 1.5, // Reduced friction slip for less drifting
             dampingRelaxation: 2.3,
             dampingCompression: 4.4,
             maxSuspensionForce: 100000,
             rollInfluence: 0.01,
             axleLocal: new CANNON.Vec3(0, 0, 1),
-            chassisConnectionPointLocal: new CANNON.Vec3(1, 0, 1),
+            chassisConnectionPointLocal: new CANNON.Vec3(-1, 0, 1.2), // Adjusted connection points
             maxSuspensionTravel: 0.3,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true
         };
 
+        this.wheels = [];
+        this.vehicle = null; // CANNON vehicle
+
         this.createCar();
     }
 
     createCar() {
-        // Create car body
-        const bodyGeometry = new THREE.BoxGeometry(2, 0.5, 4);
+        // Create car body physics
+        const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.3, 2)); // Adjusted chassis size
+        const chassisBody = new CANNON.Body({
+            mass: 1500, // Car mass
+            position: new CANNON.Vec3(0, 1, 0),
+            shape: chassisShape,
+            linearDamping: 0.1, // Reduced linear damping
+            angularDamping: 0.1 // Reduced angular damping
+        });
+        this.world.addBody(chassisBody);
+
+        // Create the CANNON vehicle
+        this.vehicle = new CANNON.RaycastVehicle({
+            chassisBody: chassisBody,
+        });
+
+        // Add wheels
+        const axlewidth = 1; // Distance between left and right wheels
+        const back = -1.2; // Z position of back wheels
+        const front = 1.3; // Z position of front wheels
+
+        this.wheelOptions.chassisConnectionPointLocal = new CANNON.Vec3(-axlewidth / 2, 0, front);
+        this.vehicle.addWheel(this.wheelOptions);
+
+        this.wheelOptions.chassisConnectionPointLocal = new CANNON.Vec3(axlewidth / 2, 0, front);
+        this.vehicle.addWheel(this.wheelOptions);
+
+        this.wheelOptions.chassisConnectionPointLocal = new CANNON.Vec3(-axlewidth / 2, 0, back);
+        this.vehicle.addWheel(this.wheelOptions);
+
+        this.wheelOptions.chassisConnectionPointLocal = new CANNON.Vec3(axlewidth / 2, 0, back);
+        this.vehicle.addWheel(this.wheelOptions);
+
+        this.vehicle.addToWorld(this.world);
+
+        // Create visible car mesh (simple box for now)
+        const bodyGeometry = new THREE.BoxGeometry(2, 0.6, 4.2); // Adjusted mesh size
         const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x2c3e50 });
         this.mesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
         this.mesh.castShadow = true;
         this.mesh.receiveShadow = true;
         this.scene.add(this.mesh);
 
-        // Create car body physics
-        const shape = new CANNON.Box(new CANNON.Vec3(1, 0.25, 2));
-        this.body = new CANNON.Body({ mass: 1500 });
-        this.body.addShape(shape);
-        this.body.position.set(0, 1, 0);
-        this.body.angularDamping = 0.1;
-        this.world.addBody(this.body);
+        // Create visible wheel meshes
+        const wheelGeometry = new THREE.CylinderGeometry(this.wheelOptions.radius, this.wheelOptions.radius, 0.3, 32);
+        wheelGeometry.rotateZ(Math.PI / 2);
+        const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
 
-        // Create wheels
-        this.wheels = [];
-        const wheelPositions = [
-            { x: -1, y: 0, z: -1.5 },
-            { x: 1, y: 0, z: -1.5 },
-            { x: -1, y: 0, z: 1.5 },
-            { x: 1, y: 0, z: 1.5 }
-        ];
-
-        wheelPositions.forEach(position => {
-            const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 32);
-            wheelGeometry.rotateZ(Math.PI / 2);
-            const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
-            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            wheel.castShadow = true;
-            this.scene.add(wheel);
-            this.wheels.push(wheel);
-
-            const wheelBody = new CANNON.Body({ mass: 1 });
-            const wheelShape = new CANNON.Sphere(0.4);
-            wheelBody.addShape(wheelShape);
-            wheelBody.position.set(position.x, position.y, position.z);
-            this.world.addBody(wheelBody);
-
-            const constraint = new CANNON.PointToPointConstraint(
-                this.body,
-                new CANNON.Vec3(position.x, position.y, position.z),
-                wheelBody,
-                new CANNON.Vec3(0, 0, 0)
-            );
-            this.world.addConstraint(constraint);
-        });
+        for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
+            const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheelMesh.castShadow = true;
+            this.scene.add(wheelMesh);
+            this.wheels.push(wheelMesh);
+        }
     }
 
     update(deltaTime, controls) {
         // Update steering
         if (controls.left) {
-            this.steeringVal = Math.max(this.steeringVal - this.steeringSpeed, -this.maxSteerVal);
+            this.steeringValue += this.steeringIncrement;
         } else if (controls.right) {
-            this.steeringVal = Math.min(this.steeringVal + this.steeringSpeed, this.maxSteerVal);
+            this.steeringValue -= this.steeringIncrement;
         } else {
-            // Gradually reset steering when no input
-            if (this.steeringVal > 0) {
-                this.steeringVal = Math.max(0, this.steeringVal - this.steeringResetSpeed);
-            } else if (this.steeringVal < 0) {
-                this.steeringVal = Math.min(0, this.steeringVal + this.steeringResetSpeed);
+            // Gradually return steering to center
+            if (this.steeringValue > 0) {
+                this.steeringValue -= this.steeringDecceleration;
+                this.steeringValue = Math.max(0, this.steeringValue);
+            } else if (this.steeringValue < 0) {
+                this.steeringValue += this.steeringDecceleration;
+                this.steeringValue = Math.min(0, this.steeringValue);
             }
         }
 
-        // Update engine force
+        // Clamp steering value
+        this.steeringValue = Math.max(-this.maxSteerVal, Math.min(this.maxSteerVal, this.steeringValue));
+
+        // Apply steering to front wheels
+        this.vehicle.setSteeringValue(this.steeringValue, 0); // Front left
+        this.vehicle.setSteeringValue(this.steeringValue, 1); // Front right
+
+        // Update engine and brake force
+        this.engineForce = 0;
+        this.brakeForce = 0;
+
         if (controls.forward) {
-            this.engineForce = this.maxForce;
+            this.engineForce = this.maxEngineForce;
         } else if (controls.backward) {
-            this.engineForce = -this.maxForce * 0.5; // Slower reverse
-        } else {
-            this.engineForce = 0;
+            this.engineForce = -this.maxEngineForce * 0.5; // Slower reverse
         }
 
-        // Update brake force
-        this.breakingForce = controls.brake ? this.brakeForce : 0;
+        if (controls.brake) {
+            this.brakeForce = this.maxBrakeForce;
+        } else if (controls.handbrake) {
+            this.brakeForce = this.maxBrakeForce * 0.5; // Partial brake for handbrake
+            this.engineForce = 0; // Cut engine power on handbrake
+        }
 
-        // Apply forces to wheels
-        this.wheels.forEach((wheel, index) => {
-            const wheelBody = this.world.bodies[this.world.bodies.indexOf(this.body) + 1 + index];
-            if (wheelBody) {
-                // Apply engine force
-                const force = new CANNON.Vec3(0, 0, this.engineForce);
-                force.applyQuaternion(this.body.quaternion);
-                wheelBody.applyLocalForce(force, new CANNON.Vec3(0, 0, 0));
+        // Apply engine and brake force to wheels
+        this.vehicle.applyEngineForce(this.engineForce, 2); // Rear left
+        this.vehicle.applyEngineForce(this.engineForce, 3); // Rear right
 
-                // Apply brake force
-                if (this.breakingForce > 0) {
-                    const brakeForce = new CANNON.Vec3(0, 0, -this.breakingForce);
-                    brakeForce.applyQuaternion(this.body.quaternion);
-                    wheelBody.applyLocalForce(brakeForce, new CANNON.Vec3(0, 0, 0));
-                }
+        this.vehicle.setBrake(this.brakeForce, 0); // Front left
+        this.vehicle.setBrake(this.brakeForce, 1); // Front right
+        this.vehicle.setBrake(this.brakeForce, 2); // Rear left
+        this.vehicle.setBrake(this.brakeForce, 3); // Rear right
 
-                // Apply steering
-                if (index < 2) { // Only front wheels steer
-                    const steerForce = new CANNON.Vec3(this.steeringVal * 1000, 0, 0);
-                    steerForce.applyQuaternion(this.body.quaternion);
-                    wheelBody.applyLocalForce(steerForce, new CANNON.Vec3(0, 0, 0));
-                }
-            }
-        });
+        // Update mesh positions and rotations from physics bodies
+        this.mesh.position.copy(this.vehicle.chassisBody.position);
+        this.mesh.quaternion.copy(this.vehicle.chassisBody.quaternion);
 
-        // Update mesh positions
-        this.mesh.position.copy(this.body.position);
-        this.mesh.quaternion.copy(this.body.quaternion);
-
-        this.wheels.forEach((wheel, index) => {
-            const wheelBody = this.world.bodies[this.world.bodies.indexOf(this.body) + 1 + index];
-            if (wheelBody) {
-                wheel.position.copy(wheelBody.position);
-                wheel.quaternion.copy(wheelBody.quaternion);
-            }
-        });
+        for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
+            this.vehicle.updateWheelTransform(i);
+            const wheel = this.wheels[i];
+            const wheelTransform = this.vehicle.wheelInfos[i].worldTransform;
+            wheel.position.copy(wheelTransform.position);
+            wheel.quaternion.copy(wheelTransform.quaternion);
+        }
     }
 } 
