@@ -1,5 +1,5 @@
 {
-  "name": "vibe-simulator",
+  "name": "slow-roads-clone",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "three": "^0.160.0",
-    "three-geo": "^1.0.0",
-    "osmtogeojson": "^3.0.0-beta.5"
+    "cannon-es": "^0.20.0",
+    "simplex-noise": "^4.0.1"
   },
   "devDependencies": {
     "vite": "^5.0.0"
