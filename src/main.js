@@ -32,14 +32,13 @@ function init() {
     
     // Since no assets are explicitly loaded, the manager is immediately ready.
     // Manually trigger the initialization steps.
-    console.log('Setting isGameInitialized to true and hiding loading screen immediately.');
+    console.log('Attempting to force game initialization and hide loading screen.');
     document.querySelector('.loading').style.display = 'none';
     isGameInitialized = true;
 
     // Keep onLoad for potential future use (e.g., loading models, textures)
     loadingManager.onLoad = () => {
-        console.log('Loading complete (onLoad callback, should not happen if no assets).');
-        // The loading screen is already hidden, this is just a confirmation log.
+        console.log('Loading complete (onLoad callback - should not fire without assets).');
     };
 
     // Create scene
