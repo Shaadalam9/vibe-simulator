@@ -31,12 +31,29 @@ h1 {
   line-height: 1.1;
 }
 
-#app {
-  display: none;
-}
-
 canvas {
   display: block;
+}
+
+.loading {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  text-align: center;
+  z-index: 1000;
+}
+
+.loading h1 {
+  font-size: 2.5em;
+  margin-bottom: 0.5em;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.loading p {
+  font-size: 1.2em;
+  opacity: 0.8;
 }
 
 .controls {
@@ -61,27 +78,6 @@ canvas {
 .controls p {
   margin: 5px 0;
   opacity: 0.9;
-}
-
-.loading {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  text-align: center;
-  z-index: 1000;
-}
-
-.loading h1 {
-  font-size: 2.5em;
-  margin-bottom: 0.5em;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-}
-
-.loading p {
-  font-size: 1.2em;
-  opacity: 0.8;
 }
 
 .logo {

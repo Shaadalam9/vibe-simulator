@@ -28,8 +28,17 @@ function init() {
     // Create loading manager
     loadingManager = new THREE.LoadingManager();
     loadingManager.onLoad = () => {
-        document.querySelector('.loading').style.display = 'none';
-        isGameInitialized = true;
+        // Add a slight delay to make the loading screen transition visible
+        setTimeout(() => {
+            document.querySelector('.loading').style.display = 'none';
+            isGameInitialized = true;
+
+            // Add a border to the renderer's canvas for debugging
+            if (renderer && renderer.domElement) {
+                renderer.domElement.style.border = '2px solid red';
+            }
+
+        }, 500); // 500ms delay
     };
 
     // Create scene
