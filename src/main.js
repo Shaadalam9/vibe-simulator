@@ -36,9 +36,18 @@ let sky;
 let sun;
 let timeOfDay = 0.5; // 0 to 1, representing time of day
 let timeSpeed = 0.1; // Speed of time progression
+let loadingManager;
+let isGameInitialized = false;
 
 // Initialize the game
 function init() {
+    // Create loading manager
+    loadingManager = new THREE.LoadingManager();
+    loadingManager.onLoad = () => {
+        document.querySelector('.loading').style.display = 'none';
+        isGameInitialized = true;
+    };
+
     // Create scene
     scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x87ceeb, 0.002);
@@ -77,12 +86,6 @@ function init() {
 
     // Handle window resize
     window.addEventListener('resize', onWindowResize, false);
-
-    // Remove loading message
-    const loadingElement = document.getElementById('loading');
-    if (loadingElement) {
-        loadingElement.style.display = 'none';
-    }
 
     // Start animation loop
     animate();
@@ -165,11 +168,15 @@ const gameControls = {
     forward: false,
     backward: false,
     left: false,
-    right: false
+    right: false,
+    brake: false,
+    handbrake: false
 };
 
 // Handle keyboard input
 document.addEventListener('keydown', (event) => {
+    if (!isGameInitialized) return;
+    
     switch (event.key.toLowerCase()) {
         case 'w':
             gameControls.forward = true;
@@ -183,10 +190,18 @@ document.addEventListener('keydown', (event) => {
         case 'd':
             gameControls.right = true;
             break;
+        case ' ':
+            gameControls.handbrake = true;
+            break;
+        case 'b':
+            gameControls.brake = true;
+            break;
     }
 });
 
 document.addEventListener('keyup', (event) => {
+    if (!isGameInitialized) return;
+    
     switch (event.key.toLowerCase()) {
         case 'w':
             gameControls.forward = false;
@@ -199,6 +214,12 @@ document.addEventListener('keyup', (event) => {
             break;
         case 'd':
             gameControls.right = false;
+            break;
+        case ' ':
+            gameControls.handbrake = false;
+            break;
+        case 'b':
+            gameControls.brake = false;
             break;
     }
 });
@@ -241,6 +262,8 @@ function updateTimeOfDay() {
 // Animation loop
 function animate() {
     requestAnimationFrame(animate);
+
+    if (!isGameInitialized) return;
 
     const deltaTime = clock.getDelta();
 
