@@ -37,7 +37,7 @@ canvas {
   height: 100vh !important;
 }
 
-.loading {
+#loading {
   position: fixed;
   top: 0;
   left: 0;
@@ -50,6 +50,9 @@ canvas {
   color: white;
   font-size: 24px;
   z-index: 1000;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.5s ease-in-out;
 }
 
 .loading h1 {

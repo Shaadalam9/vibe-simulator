@@ -99,16 +99,16 @@ class Game {
         window.addEventListener('resize', () => this.onWindowResize(), false);
         console.log('Window resize listener added.');
 
-        // Remove loading message
-        console.log('Attempting to hide loading element with ID #loading.');
-        const loadingElement = document.querySelector('#loading');
-        if (loadingElement) {
-            console.log('Loading element with ID #loading found.', loadingElement);
-            loadingElement.style.display = 'none';
-            console.log('Loading element display set to none.');
-        } else {
-            console.log('Loading element with ID #loading not found.');
-        }
+        // Remove loading message - This will now be handled in main.js
+        // console.log('Attempting to hide loading element with ID #loading.');
+        // const loadingElement = document.querySelector('#loading');
+        // if (loadingElement) {
+        //     console.log('Loading element with ID #loading found.', loadingElement);
+        //     loadingElement.style.display = 'none';
+        //     console.log('Loading element display set to none.');
+        // } else {
+        //     console.log('Loading element with ID #loading not found.');
+        // }
 
          const canvas = this.renderer.domElement;
          canvas.style.display = 'block'; // Ensure canvas is visible
