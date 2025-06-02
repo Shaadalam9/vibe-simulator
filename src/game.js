@@ -164,33 +164,73 @@ class Game {
 
         geometry.computeVertexNormals();
 
-        // Create terrain material with better textures
+        // Create terrain material with better textures using a shader for blending
         const textureLoader = new THREE.TextureLoader();
-        const grassTexture = textureLoader.load('/textures/grass.jpg');
-        const dirtTexture = textureLoader.load('/textures/dirt.jpg');
-        const rockTexture = textureLoader.load('/textures/rock.jpg');
+        const textureRepeat = 100; // Adjust repeat based on terrain size and texture size
 
-        // Set texture repeat
-        const textureRepeat = 100;
-        grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
-        dirtTexture.wrapS = dirtTexture.wrapT = THREE.RepeatWrapping;
-        rockTexture.wrapS = rockTexture.wrapT = THREE.RepeatWrapping;
-        grassTexture.repeat.set(textureRepeat, textureRepeat);
-        dirtTexture.repeat.set(textureRepeat, textureRepeat);
-        rockTexture.repeat.set(textureRepeat, textureRepeat);
+        const grassTexture = textureLoader.load('/textures/grass.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+        const dirtTexture = textureLoader.load('/textures/dirt.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+        const rockTexture = textureLoader.load('/textures/rock.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
 
-        // Create terrain material with multiple textures
-        const material = new THREE.MeshStandardMaterial({
-            map: grassTexture,
-            normalMap: grassTexture,
-            roughnessMap: grassTexture,
-            roughness: 0.8,
-            metalness: 0.1,
-            flatShading: false
+        const terrainShader = {
+            uniforms: {
+                grassTexture: { value: grassTexture },
+                dirtTexture: { value: dirtTexture },
+                rockTexture: { value: rockTexture },
+                // Define height ranges for blending (these will need tuning)
+                lowHeight: { value: 0 },
+                midHeight: { value: 100 },
+                highHeight: { value: 300 },
+                // Add light and material properties uniforms if needed
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                varying float vHeight;
+                void main() {
+                    vUv = uv;
+                    vHeight = position.y;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D grassTexture;
+                uniform sampler2D dirtTexture;
+                uniform sampler2D rockTexture;
+                uniform float lowHeight;
+                uniform float midHeight;
+                uniform float highHeight;
+
+                varying vec2 vUv;
+                varying float vHeight;
+
+                void main() {
+                    vec4 grassColor = texture2D(grassTexture, vUv);
+                    vec4 dirtColor = texture2D(dirtTexture, vUv);
+                    vec4 rockColor = texture2D(rockTexture, vUv);
+
+                    // Simple height-based blending
+                    float blend1 = smoothstep(lowHeight, midHeight, vHeight);
+                    float blend2 = smoothstep(midHeight, highHeight, vHeight);
+
+                    vec4 finalColor = mix(grassColor, dirtColor, blend1);
+                    finalColor = mix(finalColor, rockColor, blend2);
+
+                    gl_FragColor = finalColor;
+                }
+            `,
+        };
+
+        const material = new THREE.ShaderMaterial({
+            uniforms: terrainShader.uniforms,
+            vertexShader: terrainShader.vertexShader,
+            fragmentShader: terrainShader.fragmentShader,
+            // Add lights, fog, and shadow support to the shader if needed
         });
 
         this.terrain = new THREE.Mesh(geometry, material);
         this.terrain.receiveShadow = true;
+        // Enable casting shadows if the material supports it (requires shader modifications)
+        // this.terrain.castShadow = true;
         this.scene.add(this.terrain);
 
         // Add trees and rocks
@@ -366,7 +406,7 @@ class Game {
         const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), initialDirection.negate()); // Car initially faces +Z, road direction is movement direction
 
         // Create the car at the starting road point with the calculated rotation
-        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(startPoint.x, startPoint.y + 0.5, startPoint.z), quaternion); // Add slight offset above road
+        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(startPoint.x, startPoint.y + 0.3, startPoint.z), quaternion); // Reduced slight offset above road
 
         console.log('Car created at road start.');
     }

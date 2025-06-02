@@ -99,17 +99,18 @@ export class Car {
     createVehicle() {
         const options = {
             radius: 0.4,
-            directionLocal: new CANNON.Vec3(0, -1, 0),
-            suspensionStiffness: 30,
-            suspensionRestLength: 0.3,
-            frictionSlip: 1.5,
-            dampingRelaxation: 2.3,
-            dampingCompression: 4.4,
+            directionLocal: new CANNON.Vec3(0, -1, 0), // Wheel direction (downwards)
+            suspensionStiffness: 50, // Increased stiffness
+            suspensionRestLength: 0.5, // Adjusted rest length (increased)
+            frictionSlip: 0.8, // Reduced friction slip
+            dampingRelaxation: 3, // Adjusted damping
+            dampingCompression: 4.5, // Adjusted damping
             maxSuspensionForce: 100000,
             rollInfluence: 0.01,
-            axleLocal: new CANNON.Vec3(0, 0, 1),
-            chassisConnectionPointLocal: new CANNON.Vec3(1, 0, 1),
-            maxSuspensionTravel: 0.3,
+            axleLocal: new CANNON.Vec3(0, 0, 1), // Axle direction
+            // Adjusted connection points to be slightly lower relative to the chassis bottom
+            chassisConnectionPointLocal: new CANNON.Vec3(1, -0.3, 1),
+            maxSuspensionTravel: 0.5, // Increased travel
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true
         };
@@ -123,10 +124,10 @@ export class Car {
 
         // Add wheels with their connection points
         const wheelInfos = [
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(-1, -0.25, 1.5) },  // Front left
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(1, -0.25, 1.5) },   // Front right
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(-1, -0.25, -1.5) }, // Rear left
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(1, -0.25, -1.5) }   // Rear right
+            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(-1, -0.3, 1.5) },  // Front left
+            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(1, -0.3, 1.5) },   // Front right
+            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(-1, -0.3, -1.5) }, // Rear left
+            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(1, -0.3, -1.5) }   // Rear right
         ];
 
         wheelInfos.forEach(info => {
