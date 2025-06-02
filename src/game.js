@@ -24,6 +24,7 @@ class Game {
     }
 
     init() {
+        console.log('Game init() called');
         // Setup renderer
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
@@ -58,9 +59,13 @@ class Game {
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
         // Remove loading message
+        console.log('Attempting to hide loading element');
         const loadingElement = document.getElementById('loading');
         if (loadingElement) {
+            console.log('Loading element found, hiding it.');
             loadingElement.style.display = 'none';
+        } else {
+            console.log('Loading element not found.');
         }
     }
 
@@ -224,22 +229,22 @@ class Game {
 
     createLights() {
         // Ambient light
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-        this.scene.add(ambientLight);
+        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        this.scene.add(this.ambientLight);
 
         // Directional light (sun)
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(50, 100, 50);
-        directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 4096;
-        directionalLight.shadow.mapSize.height = 4096;
-        directionalLight.shadow.camera.near = 0.5;
-        directionalLight.shadow.camera.far = 500;
-        directionalLight.shadow.camera.left = -100;
-        directionalLight.shadow.camera.right = 100;
-        directionalLight.shadow.camera.top = 100;
-        directionalLight.shadow.camera.bottom = -100;
-        this.scene.add(directionalLight);
+        this.directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        this.directionalLight.position.set(50, 100, 50);
+        this.directionalLight.castShadow = true;
+        this.directionalLight.shadow.mapSize.width = 4096;
+        this.directionalLight.shadow.mapSize.height = 4096;
+        this.directionalLight.shadow.camera.near = 0.5;
+        this.directionalLight.shadow.camera.far = 500;
+        this.directionalLight.shadow.camera.left = -100;
+        this.directionalLight.shadow.camera.right = 100;
+        this.directionalLight.shadow.camera.top = 100;
+        this.directionalLight.shadow.camera.bottom = -100;
+        this.scene.add(this.directionalLight);
     }
 
     createWater() {

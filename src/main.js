@@ -85,5 +85,4 @@ weatherElement.innerHTML = `
 `;
 document.body.appendChild(weatherElement);
 
-// Make game instance globally accessible for weather controls
-window.game = game;
+game.setWeather('snowy');
