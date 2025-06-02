@@ -142,6 +142,8 @@ class Game {
         // Create terrain geometry
         const geometry = new THREE.PlaneGeometry(size, size, resolution, resolution);
         geometry.rotateX(-Math.PI / 2);
+        geometry.computeBoundingSphere(); // Compute bounding sphere for frustum culling
+        geometry.computeTangents(); // Compute tangents for normal mapping
 
         // Generate height map with multiple octaves of noise
         const vertices = geometry.attributes.position.array;
@@ -172,23 +174,54 @@ class Game {
         const dirtTexture = textureLoader.load('/textures/dirt.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
         const rockTexture = textureLoader.load('/textures/rock.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
 
+        // Load normal and roughness maps
+        const grassNormalMap = textureLoader.load('/textures/grass_normal.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+        const dirtNormalMap = textureLoader.load('/textures/dirt_normal.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+        const rockNormalMap = textureLoader.load('/textures/rock_normal.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+
+        const grassRoughnessMap = textureLoader.load('/textures/grass_roughness.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+        const dirtRoughnessMap = textureLoader.load('/textures/dirt_roughness.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+        const rockRoughnessMap = textureLoader.load('/textures/rock_roughness.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
+
         const terrainShader = {
             uniforms: {
                 grassTexture: { value: grassTexture },
                 dirtTexture: { value: dirtTexture },
                 rockTexture: { value: rockTexture },
+                grassNormalMap: { value: grassNormalMap },
+                dirtNormalMap: { value: dirtNormalMap },
+                rockNormalMap: { value: rockNormalMap },
+                grassRoughnessMap: { value: grassRoughnessMap },
+                dirtRoughnessMap: { value: dirtRoughnessMap },
+                rockRoughnessMap: { value: rockRoughnessMap },
                 // Define height ranges for blending (these will need tuning)
                 lowHeight: { value: 0 },
                 midHeight: { value: 100 },
                 highHeight: { value: 300 },
                 // Add light and material properties uniforms if needed
+
+                // Explicitly add light and camera uniforms for clarity and potential debugging
+                directionalLights: { value: [] },
+                directionalLightColor: { value: [] },
+                ambientLightColor: { value: new THREE.Color(0xffffff) },
+                viewPosition: { value: new THREE.Vector3() },
             },
             vertexShader: `
                 varying vec2 vUv;
                 varying float vHeight;
+                attribute vec4 tangent; // Uncomment tangent attribute
+                varying vec3 vNormal;
+                varying vec3 vTangent;
+                varying vec3 vBitangent;
+
                 void main() {
                     vUv = uv;
                     vHeight = position.y;
+                    // Pass normal and tangent if needed for lighting
+                    vNormal = normal;
+                    vTangent = tangent.xyz;
+                    // Calculate bitangent
+                    vBitangent = cross(normal, tangent.xyz) * tangent.w;
                     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
                 }
             `,
@@ -196,17 +229,50 @@ class Game {
                 uniform sampler2D grassTexture;
                 uniform sampler2D dirtTexture;
                 uniform sampler2D rockTexture;
+                uniform sampler2D grassNormalMap;
+                uniform sampler2D dirtNormalMap;
+                uniform sampler2D rockNormalMap;
+                uniform sampler2D grassRoughnessMap;
+                uniform sampler2D dirtRoughnessMap;
+                uniform sampler2D rockRoughnessMap;
                 uniform float lowHeight;
                 uniform float midHeight;
                 uniform float highHeight;
 
+                // Uniforms provided by THREE.js when lights: true
+                uniform vec3 directionalLights[ 1 ];
+                uniform vec3 directionalLightColor[ 1 ];
+                uniform vec3 ambientLightColor;
+
+                // Camera position (for view direction calculation)
+                uniform vec3 viewPosition;
+
                 varying vec2 vUv;
                 varying float vHeight;
+                varying vec3 vNormal;
+                varying vec3 vTangent;
+                varying vec3 vBitangent;
+
+                // PBR related uniforms (simplified, can be expanded)
+                // uniform vec3 albedo; // Albedo is provided by blended texture
+                // uniform float metalness; // Terrain is typically non-metallic
+                // uniform float roughness; // Roughness is provided by blended texture
 
                 void main() {
+                    // Sample base textures
                     vec4 grassColor = texture2D(grassTexture, vUv);
                     vec4 dirtColor = texture2D(dirtTexture, vUv);
                     vec4 rockColor = texture2D(rockTexture, vUv);
+
+                    // Sample normal maps (values will be in tangent space if tangents are calculated in vertex shader)
+                    vec3 grassNormal = texture2D(grassNormalMap, vUv).rgb * 2.0 - 1.0;
+                    vec3 dirtNormal = texture2D(dirtNormalMap, vUv).rgb * 2.0 - 1.0;
+                    vec3 rockNormal = texture2D(rockNormalMap, vUv).rgb * 2.0 - 1.0;
+
+                    // Sample roughness maps
+                    float grassRoughness = texture2D(grassRoughnessMap, vUv).r;
+                    float dirtRoughness = texture2D(dirtRoughnessMap, vUv).r;
+                    float rockRoughness = texture2D(rockRoughnessMap, vUv).r;
 
                     // Simple height-based blending
                     float blend1 = smoothstep(lowHeight, midHeight, vHeight);
@@ -215,8 +281,63 @@ class Game {
                     vec4 finalColor = mix(grassColor, dirtColor, blend1);
                     finalColor = mix(finalColor, rockColor, blend2);
 
-                    gl_FragColor = finalColor;
+                    // Blend normals and roughness based on the same blending factors
+                    vec3 blendedNormal = mix(mix(grassNormal, dirtNormal, blend1), rockNormal, blend2);
+                    // Transform blended normal from tangent space to world space
+                    mat3 tbn = mat3(normalize(vTangent), normalize(vBitangent), normalize(vNormal));
+                    vec3 worldNormal = normalize(tbn * blendedNormal);
+
+                    float blendedRoughness = mix(mix(grassRoughness, dirtRoughness, blend1), rockRoughness, blend2);
+
+                    // PBR Lighting Calculation (simplified)
+                    vec3 N = worldNormal; // World space normal
+                    vec3 V = normalize(viewPosition - gl_Position.xyz); // View direction
+                    vec3 L = normalize(directionalLights[0]); // Light direction
+                    vec3 lightColor = directionalLightColor[0];
+
+                    // Ambient term
+                    vec3 ambient = ambientLightColor * finalColor.rgb;
+
+                    // Diffuse term (Lambertian)
+                    float NdotL = max(dot(N, L), 0.0);
+                    vec3 diffuse = lightColor * finalColor.rgb * NdotL;
+
+                    // Specular term (simplified GGX/Trowbridge-Reitz)
+                    vec3 H = normalize(L + V); // Halfway vector
+                    float NdotH = max(dot(N, H), 0.0);
+                    float NdotV = max(dot(N, V), 0.0);
+                    float HdotV = max(dot(H, V), 0.0);
+
+                    // Geometric obstruction (G) - Schlick-GGX
+                    float k = (blendedRoughness + 1.0) * (blendedRoughness + 1.0) / 8.0;
+                    float G_V = NdotV / (NdotV * (1.0 - k) + k);
+                    float G_L = NdotL / (NdotL * (1.0 - k) + k);
+                    float G = G_V * G_L;
+
+                    // Normal Distribution Function (D) - Trowbridge-Reitz GGX
+                    float NdotH2 = NdotH * NdotH;
+                    float alpha = blendedRoughness * blendedRoughness;
+                    float alpha2 = alpha * alpha;
+                    float denom = NdotH2 * (alpha2 - 1.0) + 1.0;
+                    float D = alpha2 / (PI * denom * denom);
+
+                    // Fresnel (F) - Schlick approximation
+                    vec3 F0 = vec3(0.04); // Reflectivity at normal incidence for non-metals
+                    vec3 F = F0 + (1.0 - F0) * pow(max(1.0 - HdotV, 0.0), 5.0);
+
+                    // Specular BRDF
+                    vec3 specular = (D * G * F) / max(4.0 * NdotL * NdotV, 0.001);
+
+                    // Combine ambient, diffuse, and specular
+                    vec3 finalLighting = ambient + diffuse + lightColor * specular;
+
+                    gl_FragColor = vec4(finalLighting, finalColor.a);
                 }
+
+                // Define PI for shader
+                #ifndef PI
+                #define PI 3.14159265359
+                #endif
             `,
         };
 
@@ -225,6 +346,9 @@ class Game {
             vertexShader: terrainShader.vertexShader,
             fragmentShader: terrainShader.fragmentShader,
             // Add lights, fog, and shadow support to the shader if needed
+            lights: true, // Enable lighting support in the shader material
+            fog: true,   // Enable fog support
+            // vertexTangents: true // Required if using tangent attribute in vertex shader
         });
 
         this.terrain = new THREE.Mesh(geometry, material);
@@ -253,8 +377,8 @@ class Game {
     }
 
     addEnvironmentDetails() {
-        // Add trees
-        const treeCount = 1000;
+        // Add trees (scattered)
+        const treeCount = 500; // Reduce scattered trees slightly to focus on roadside
         const treeGeometry = new THREE.ConeGeometry(2, 5, 8);
         const treeMaterial = new THREE.MeshStandardMaterial({ color: 0x2d5a27 });
         const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
@@ -265,9 +389,13 @@ class Game {
             const z = (Math.random() - 0.5) * 10000;
             const y = this.getTerrainHeightAt(x, z);
 
+            // Avoid placing scattered trees too close to the road
+            const distanceToRoad = this.getDistanceToRoad(x, z);
+            if (distanceToRoad < 50) continue; // Adjust threshold as needed
+
             // Create tree group
             const tree = new THREE.Group();
-            
+
             // Add trunk
             const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
             trunk.position.y = 1;
@@ -285,10 +413,10 @@ class Game {
             this.scene.add(tree);
         }
 
-        // Add rocks
-        const rockCount = 500;
+        // Add rocks (scattered)
+        const rockCount = 200; // Reduce scattered rocks slightly
         const rockGeometry = new THREE.DodecahedronGeometry(1, 0);
-        const rockMaterial = new THREE.MeshStandardMaterial({ 
+        const rockMaterial = new THREE.MeshStandardMaterial({
             color: 0x808080,
             roughness: 0.9,
             metalness: 0.1
@@ -299,6 +427,10 @@ class Game {
             const z = (Math.random() - 0.5) * 10000;
             const y = this.getTerrainHeightAt(x, z);
 
+            // Avoid placing scattered rocks too close to the road
+            const distanceToRoad = this.getDistanceToRoad(x, z);
+            if (distanceToRoad < 20) continue; // Adjust threshold as needed
+
             const rock = new THREE.Mesh(rockGeometry, rockMaterial);
             rock.position.set(x, y, z);
             rock.rotation.set(
@@ -307,13 +439,134 @@ class Game {
                 Math.random() * Math.PI
             );
             rock.scale.set(
-                1 + Math.random() * 2,
-                1 + Math.random() * 2,
-                1 + Math.random() * 2
+                0.5 + Math.random() * 1.5, // Smaller scattered rocks
+                0.5 + Math.random() * 1.5,
+                0.5 + Math.random() * 1.5
             );
             rock.castShadow = true;
             rock.receiveShadow = true;
             this.scene.add(rock);
+        }
+
+        // Add dense vegetation along the road (bushes)
+        const roadsideVegetationCount = 5000; // More vegetation along the road
+        const bushGeometry = new THREE.SphereGeometry(1.5, 8, 8); // Simple bush geometry
+        const bushMaterial = new THREE.MeshStandardMaterial({ color: 0x4a7c40 }); // Bush color
+
+        // Consider using instancing for roadside vegetation for performance
+        const bushMesh = new THREE.InstancedMesh(bushGeometry, bushMaterial, roadsideVegetationCount);
+        const dummyBush = new THREE.Object3D();
+
+        if (this.roadPoints && this.roadPoints.length > 1) {
+             for (let i = 0; i < roadsideVegetationCount; i++) {
+                // Pick a random point along the road segment
+                const roadPointIndex = Math.floor(Math.random() * (this.roadPoints.length - 1));
+                const p1 = this.roadPoints[roadPointIndex];
+                const p2 = this.roadPoints[roadPointIndex + 1];
+
+                 const t = Math.random(); // Position along the segment
+                 const position = new THREE.Vector3().copy(p1).lerp(p2, t);
+
+                const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
+                const upVector = new THREE.Vector3(0, 1, 0);
+                const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
+
+                // Position the vegetation near the road barrier on one side
+                const sideOffset = Math.random() * 5; // Distance away from the barrier
+                const offsetX = (Math.random() - 0.5) * 2; // Small random offset perpendicular
+                const offsetZ = (Math.random() - 0.5) * 0.5; // Small random offset along road
+
+                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) + 0.5 + sideOffset + offsetX));
+                position.add(segmentDirection.clone().multiplyScalar(offsetZ));
+
+                 const height = this.getTerrainHeightAt(position.x, position.z);
+                 position.y = height + bushGeometry.parameters.radius * 0.3; // Place on terrain with slight offset
+
+                // Add some randomness to scale and rotation
+                const scale = 0.8 + Math.random() * 0.7; // Varied scale
+                dummyBush.position.copy(position);
+                dummyBush.scale.set(scale, scale, scale);
+                dummyBush.rotation.set(0, Math.random() * Math.PI * 2, 0);
+                dummyBush.updateMatrix();
+                bushMesh.setMatrixAt(i, dummyBush.matrix);
+             }
+             bushMesh.instanceMatrix.needsUpdate = true;
+             bushMesh.castShadow = true;
+             bushMesh.receiveShadow = true;
+             this.scene.add(bushMesh);
+        } else {
+             console.warn('Road points not available for roadside vegetation placement.');
+        }
+
+        // Add dense grass along the road edges using instancing
+        const grassBladeCount = 20000; // Large number of grass blades
+        // Simple grass blade geometry (can be improved)
+        const grassGeometry = new THREE.PlaneGeometry(0.5, 1);
+        grassGeometry.translate(0, 0.5, 0); // Pivot at the bottom
+
+        const grassMaterial = new THREE.MeshStandardMaterial({
+            color: 0x55aa55, // Green color
+            side: THREE.DoubleSide,
+            transparent: true,
+            alphaTest: 0.1 // Discard pixels below this alpha
+        });
+        // Note: For more realistic grass, you'd use a texture with alpha and potentially a shader.
+
+        const grassMesh = new THREE.InstancedMesh(grassGeometry, grassMaterial, grassBladeCount);
+        const dummyGrass = new THREE.Object3D();
+
+         if (this.roadPoints && this.roadPoints.length > 1) {
+             for (let i = 0; i < grassBladeCount; i++) {
+                 // Pick a random point along the road segment
+                const roadPointIndex = Math.floor(Math.random() * (this.roadPoints.length - 1));
+                const p1 = this.roadPoints[roadPointIndex];
+                const p2 = this.roadPoints[roadPointIndex + 1];
+
+                 const t = Math.random(); // Position along the segment
+                 const position = new THREE.Vector3().copy(p1).lerp(p2, t);
+
+                const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
+                const upVector = new THREE.Vector3(0, 1, 0);
+                const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
+
+                // Position the grass right at the road edge/barrier
+                const side = Math.random() > 0.5 ? 1 : -1; // Randomly choose left or right side
+                const offsetX = Math.random() * 1.0; // Distance away from the road edge
+                const offsetZ = (Math.random() - 0.5) * 0.2; // Small random offset along road
+
+                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + offsetX));
+                position.add(segmentDirection.clone().multiplyScalar(offsetZ));
+
+                 const height = this.getTerrainHeightAt(position.x, position.z);
+                 position.y = height; // Place directly on terrain surface
+
+                 // Add some randomness to scale and rotation
+                const scale = 0.5 + Math.random() * 0.5; // Varied scale for grass blades
+                dummyGrass.position.copy(position);
+                dummyGrass.scale.set(scale, scale, scale);
+
+                 // Align grass blade to terrain normal and then add some random y-rotation
+                 // This is a simplified approach, more advanced techniques exist.
+                 const tempNormal = new THREE.Vector3();
+                 this.terrain.geometry.computeVertexNormals(); // Ensure normals are computed
+                 const faceIndex = Math.floor(this.terrain.geometry.index.count * Math.random() / 3) * 3;
+                 const face = new THREE.Face3(this.terrain.geometry.index.array[faceIndex], this.terrain.geometry.index.array[faceIndex + 1], this.terrain.geometry.index.array[faceIndex + 2]);
+                 this.terrain.geometry.computeFaceNormals(); // Ensure face normals are computed
+                 const terrainNormal = face.normal; // This is a face normal, not vertex normal
+                 // A better approach would be to interpolate vertex normals or sample heightfield for slope.
+
+                 // For simplicity, let's just align roughly upright with random rotation around Y
+                 dummyGrass.rotation.set(0, Math.random() * Math.PI * 2, 0);
+
+                dummyGrass.updateMatrix();
+                grassMesh.setMatrixAt(i, dummyGrass.matrix);
+             }
+             grassMesh.instanceMatrix.needsUpdate = true;
+             grassMesh.castShadow = true;
+             grassMesh.receiveShadow = true;
+             this.scene.add(grassMesh);
+        } else {
+             console.warn('Road points not available for grass placement.');
         }
     }
 
@@ -329,6 +582,36 @@ class Game {
         height += this.noise(x * 0.0008, z * 0.0008) * heightScale * 0.125;
         
         return height;
+    }
+
+    getDistanceToRoad(x, z) {
+        if (!this.roadPoints || this.roadPoints.length < 2) {
+            return Infinity; // Return infinity if no road points are available
+        }
+
+        let minDistance = Infinity;
+        const point = new THREE.Vector3(x, 0, z); // Ignore Y for distance calculation to road on the XZ plane
+
+        for (let i = 0; i < this.roadPoints.length - 1; i++) {
+            const p1 = new THREE.Vector3(this.roadPoints[i].x, 0, this.roadPoints[i].z);
+            const p2 = new THREE.Vector3(this.roadPoints[i + 1].x, 0, this.roadPoints[i + 1].z);
+
+            // Calculate distance to line segment (simplified)
+            const l2 = p1.distanceToSquared(p2);
+            if (l2 === 0) {
+                minDistance = Math.min(minDistance, point.distanceTo(p1));
+            } else {
+                let t = ((point.x - p1.x) * (p2.x - p1.x) + (point.z - p1.z) * (p2.z - p1.z)) / l2;
+                t = Math.max(0, Math.min(1, t));
+                const projection = new THREE.Vector3(
+                    p1.x + t * (p2.x - p1.x),
+                    0,
+                    p1.z + t * (p2.z - p1.z)
+                );
+                minDistance = Math.min(minDistance, point.distanceTo(projection));
+            }
+        }
+        return minDistance;
     }
 
     generateHeightfieldData(size, resolution, heightScale) {
@@ -359,33 +642,178 @@ class Game {
         // Load road texture
         const textureLoader = new THREE.TextureLoader();
         const roadTexture = textureLoader.load('/textures/road.jpg', (texture) => {
-            // Texture loaded callback (optional)
-            console.log('Road texture loaded.');
-        }, undefined, (error) => {
-            console.error('Error loading road texture:', error);
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(1, 1000);
+            texture.anisotropy = 16; // Improve texture quality
         });
 
-        // Set texture repeat for tiling
-        const textureRepeat = 1000; // Adjust repeat based on road length and texture size
-        roadTexture.wrapS = roadTexture.wrapT = THREE.RepeatWrapping;
-        roadTexture.repeat.set(1, textureRepeat); // Repeat along the length of the road
+        // Create road material with better properties
+        const roadMaterial = new THREE.MeshStandardMaterial({
+            map: roadTexture,
+            roughness: 0.8,
+            metalness: 0.2,
+            normalScale: new THREE.Vector2(1, 1)
+        });
 
-        this.roadGenerator = new RoadGenerator(this.scene, this.terrain, roadTexture); // Pass texture to generator
+        this.roadGenerator = new RoadGenerator(this.scene, this.terrain, roadMaterial);
         
-        // Generate a single, long road starting from the car's initial position
-        // Assuming the car is created before the roads
-        const startPoint = new THREE.Vector3(0, 0, 0); // Start road at origin for now
-        const roadLength = 50000; // Make the road much longer
-        const curvature = 1.5; // Keep existing curvature
+        // Generate a more interesting road layout
+        const startPoint = new THREE.Vector3(0, 0, 0);
+        const roadLength = 10000; // Shorter but more interesting road
+        const curvature = 2.0; // More curved road
 
+        // Generate road points with more natural curves
         this.roadPoints = this.roadGenerator.generateRoadPoints(startPoint, roadLength, curvature);
+        
+        // Create road geometry with better properties
         const roadGeometry = this.roadGenerator.createRoadGeometry(this.roadPoints);
-        const road = new THREE.Mesh(roadGeometry, this.roadGenerator.roadMaterial);
+        const road = new THREE.Mesh(roadGeometry, roadMaterial);
+        
+        // Enable shadows
         road.receiveShadow = true;
+        road.castShadow = true;
+        
+        // Add road to scene
         this.scene.add(road);
-        this.roads = [road]; // Store the single road mesh
+        this.roads = [road];
 
-        console.log('Single long road created.');
+        // Add road markings
+        this.addRoadMarkings(roadGeometry);
+
+        // Add road barrier
+        this.addRoadBarrier();
+
+        console.log('Road created with improved properties.');
+    }
+
+    addRoadMarkings(roadGeometry) {
+        // Create center line material
+        const centerLineMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.5,
+            metalness: 0.1
+        });
+
+        // Create edge line material
+        const edgeLineMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.5,
+            metalness: 0.1
+        });
+
+        // Add center line
+        const centerLineGeometry = new THREE.BufferGeometry();
+        const centerLinePositions = [];
+        const centerLineIndices = [];
+
+        // Generate center line vertices and indices
+        const vertices = roadGeometry.attributes.position.array;
+        for (let i = 0; i < vertices.length; i += 9) {
+            const x = vertices[i];
+            const y = vertices[i + 1] + 0.01; // Slightly above road
+            const z = vertices[i + 2];
+            
+            centerLinePositions.push(x, y, z);
+            if (i > 0) {
+                centerLineIndices.push(i/3 - 1, i/3);
+            }
+        }
+
+        centerLineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(centerLinePositions, 3));
+        centerLineGeometry.setIndex(centerLineIndices);
+
+        const centerLine = new THREE.LineSegments(centerLineGeometry, centerLineMaterial);
+        this.scene.add(centerLine);
+
+        // Add edge lines (similar process for left and right edges)
+        // ... (implement edge lines if needed)
+    }
+
+    addRoadBarrier() {
+        if (!this.roadPoints || this.roadPoints.length < 2) {
+            console.error('Road points not available for barrier generation.');
+            return;
+        }
+
+        const barrierMaterial = new THREE.MeshStandardMaterial({
+            color: 0x808080, // Gray concrete color
+            roughness: 0.6,
+            metalness: 0.1
+        });
+
+        const barrierWidth = 0.5;
+        const barrierHeight = 1.0;
+
+        const barrierGeometry = new THREE.BufferGeometry();
+        const positions = [];
+        const normals = [];
+        const uvs = [];
+        const indices = [];
+        let index = 0;
+
+        for (let i = 0; i < this.roadPoints.length - 1; i++) {
+            const p1 = this.roadPoints[i];
+            const p2 = this.roadPoints[i + 1];
+
+            // Get the direction of the road segment
+            const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
+            const upVector = new THREE.Vector3(0, 1, 0);
+
+            // Calculate the perpendicular vector (pointing away from the road center)
+            const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
+
+            // Define barrier vertices for this segment
+            const v1 = new THREE.Vector3().copy(p1).add(perpendicular.clone().multiplyScalar(RoadGenerator.roadWidth / 2));
+            const v2 = new THREE.Vector3().copy(p2).add(perpendicular.clone().multiplyScalar(RoadGenerator.roadWidth / 2));
+            const v3 = new THREE.Vector3().copy(v1).add(upVector.clone().multiplyScalar(barrierHeight));
+            const v4 = new THREE.Vector3().copy(v2).add(upVector.clone().multiplyScalar(barrierHeight));
+
+            // Vertices for the side facing away from the road
+            const v5 = new THREE.Vector3().copy(v1).add(perpendicular.clone().multiplyScalar(barrierWidth));
+            const v6 = new THREE.Vector3().copy(v2).add(perpendicular.clone().multiplyScalar(barrierWidth));
+            const v7 = new THREE.Vector3().copy(v3).add(perpendicular.clone().multiplyScalar(barrierWidth));
+            const v8 = new THREE.Vector3().copy(v4).add(perpendicular.clone().multiplyScalar(barrierWidth));
+            
+            // Push positions for both sides and top
+            positions.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, v4.x, v4.y, v4.z, v3.x, v3.y, v3.z); // Side facing road
+            positions.push(v5.x, v5.y, v5.z, v6.x, v6.y, v6.z, v8.x, v8.y, v8.z, v7.x, v7.y, v7.z); // Side facing away
+            positions.push(v3.x, v3.y, v3.z, v4.x, v4.y, v4.z, v8.x, v8.y, v8.z, v7.x, v7.y, v7.z); // Top face
+
+            // Calculate and push normals (simplified - should be per vertex for smooth shading)
+            const sideNormal = perpendicular.clone().negate(); // Normal for side facing road
+            const outerSideNormal = perpendicular.clone(); // Normal for side facing away
+            const topNormal = upVector.clone(); // Normal for top face
+
+            for(let j = 0; j < 4; j++) normals.push(sideNormal.x, sideNormal.y, sideNormal.z);
+            for(let j = 0; j < 4; j++) normals.push(outerSideNormal.x, outerSideNormal.y, outerSideNormal.z);
+            for(let j = 0; j < 4; j++) normals.push(topNormal.x, topNormal.y, topNormal.z);
+
+            // Push UVs (simplified)
+            uvs.push(0, 0, 1, 0, 1, 1, 0, 1); // Side facing road
+            uvs.push(0, 0, 1, 0, 1, 1, 0, 1); // Side facing away
+            uvs.push(0, 0, 1, 0, 1, 1, 0, 1); // Top face
+
+            // Push indices
+            indices.push(index, index + 1, index + 2, index, index + 2, index + 3); // Side facing road
+            indices.push(index + 4, index + 5, index + 6, index + 4, index + 6, index + 7); // Side facing away
+            indices.push(index + 8, index + 9, index + 10, index + 8, index + 10, index + 11); // Top face
+
+            index += 12;
+        }
+
+        barrierGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        barrierGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        barrierGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        barrierGeometry.setIndex(indices);
+        
+        barrierGeometry.computeBoundingSphere();
+
+        const barrierMesh = new THREE.Mesh(barrierGeometry, barrierMaterial);
+        barrierMesh.castShadow = true;
+        barrierMesh.receiveShadow = true;
+        this.scene.add(barrierMesh);
+
+        console.log('Road barrier added.');
     }
 
     createCar(carBodyMaterial, wheelMaterial) {
@@ -393,7 +821,7 @@ class Game {
         if (!this.roadPoints || this.roadPoints.length < 2) {
             console.error('Road points not available or insufficient for car placement.');
             // Fallback to a default position if road points are not ready
-            this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(0, 200, 0));
+            this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(0, 5, 0));
             return;
         }
 
@@ -402,13 +830,19 @@ class Game {
         const initialDirection = new THREE.Vector3().subVectors(nextPoint, startPoint).normalize();
 
         // Calculate initial rotation quaternion based on the direction
-        const upVector = new THREE.Vector3(0, 1, 0); // Assuming Y is up
-        const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), initialDirection.negate()); // Car initially faces +Z, road direction is movement direction
+        const upVector = new THREE.Vector3(0, 1, 0);
+        const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), initialDirection);
 
         // Create the car at the starting road point with the calculated rotation
-        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(startPoint.x, startPoint.y + 0.3, startPoint.z), quaternion); // Reduced slight offset above road
+        // Position the car slightly above the road to prevent initial collision
+        const carPosition = new CANNON.Vec3(
+            startPoint.x,
+            startPoint.y + 1.0, // Increased height to ensure car is visible
+            startPoint.z
+        );
 
-        console.log('Car created at road start.');
+        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, carPosition, quaternion);
+        console.log('Car created at road start with position:', carPosition);
     }
 
     createWheels() {
@@ -433,23 +867,33 @@ class Game {
     }
 
     createLights() {
-        // Ambient light
-        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        // Ambient light with warmer color
+        this.ambientLight = new THREE.AmbientLight(0xffffeb, 0.3);
         this.scene.add(this.ambientLight);
 
-        // Directional light (sun)
-        this.directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        this.directionalLight.position.set(50, 100, 50);
+        // Main directional light (sun)
+        this.directionalLight = new THREE.DirectionalLight(0xffffeb, 1.2);
+        this.directionalLight.position.set(100, 200, 100);
         this.directionalLight.castShadow = true;
+
+        // Improve shadow quality
         this.directionalLight.shadow.mapSize.width = 4096;
         this.directionalLight.shadow.mapSize.height = 4096;
         this.directionalLight.shadow.camera.near = 0.5;
-        this.directionalLight.shadow.camera.far = 500;
-        this.directionalLight.shadow.camera.left = -100;
-        this.directionalLight.shadow.camera.right = 100;
-        this.directionalLight.shadow.camera.top = 100;
-        this.directionalLight.shadow.camera.bottom = -100;
+        this.directionalLight.shadow.camera.far = 1000;
+        this.directionalLight.shadow.camera.left = -200;
+        this.directionalLight.shadow.camera.right = 200;
+        this.directionalLight.shadow.camera.top = 200;
+        this.directionalLight.shadow.camera.bottom = -200;
+        this.directionalLight.shadow.bias = -0.0001;
+        this.directionalLight.shadow.normalBias = 0.02;
+        this.directionalLight.shadow.radius = 1.5;
+
         this.scene.add(this.directionalLight);
+
+        // Add hemisphere light for better ambient lighting
+        const hemisphereLight = new THREE.HemisphereLight(0xffffeb, 0x080820, 0.5);
+        this.scene.add(hemisphereLight);
     }
 
     createWater() {
@@ -475,30 +919,78 @@ class Game {
     }
 
     createAtmosphere() {
-        // Add fog
-        this.scene.fog = new THREE.FogExp2(0x87CEEB, 0.0001);
+        // Create a more realistic fog
+        this.scene.fog = new THREE.FogExp2(0x87CEEB, 0.0002);
 
-        // Add particles for weather effects
-        const particleCount = 1000;
+        // Add sky gradient
+        const skyGeometry = new THREE.SphereGeometry(10000, 32, 32);
+        const skyMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                topColor: { value: new THREE.Color(0x0077ff) },
+                bottomColor: { value: new THREE.Color(0xffffff) },
+                offset: { value: 33 },
+                exponent: { value: 0.6 }
+            },
+            vertexShader: `
+                varying vec3 vWorldPosition;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vWorldPosition = worldPosition.xyz;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 topColor;
+                uniform vec3 bottomColor;
+                uniform float offset;
+                uniform float exponent;
+                varying vec3 vWorldPosition;
+                void main() {
+                    float h = normalize(vWorldPosition + offset).y;
+                    gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+                }
+            `,
+            side: THREE.BackSide
+        });
+
+        const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+        this.scene.add(sky);
+
+        // Add subtle atmospheric particles
+        const particleCount = 2000;
         const particles = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
 
         for (let i = 0; i < particleCount * 3; i += 3) {
-            positions[i] = (Math.random() - 0.5) * 1000;
-            positions[i + 1] = Math.random() * 500;
-            positions[i + 2] = (Math.random() - 0.5) * 1000;
+            // Position particles in a sphere around the scene
+            const radius = 5000 + Math.random() * 5000;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI;
+            
+            positions[i] = radius * Math.sin(phi) * Math.cos(theta);
+            positions[i + 1] = radius * Math.sin(phi) * Math.sin(theta);
+            positions[i + 2] = radius * Math.cos(phi);
+
+            // Add subtle color variation
+            colors[i] = 0.9 + Math.random() * 0.1;
+            colors[i + 1] = 0.9 + Math.random() * 0.1;
+            colors[i + 2] = 1.0;
         }
 
         particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
         const particleMaterial = new THREE.PointsMaterial({
-            color: 0xffffff,
-            size: 0.1,
+            size: 2,
+            vertexColors: true,
             transparent: true,
-            opacity: 0.6
+            opacity: 0.3,
+            blending: THREE.AdditiveBlending
         });
 
-        this.weatherParticles = new THREE.Points(particles, particleMaterial);
-        this.scene.add(this.weatherParticles);
+        this.atmosphericParticles = new THREE.Points(particles, particleMaterial);
+        this.scene.add(this.atmosphericParticles);
     }
 
     updateWeather(deltaTime) {
@@ -865,9 +1357,9 @@ class Game {
          console.log('Weather set to:', this.weather);
          // Implement visual weather changes here
          if (this.weather === 'clear') {
-             this.weatherParticles.visible = false;
+             this.atmosphericParticles.visible = false;
          } else {
-              this.weatherParticles.visible = true;
+              this.atmosphericParticles.visible = true;
          }
      }
 }
