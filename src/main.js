@@ -41,8 +41,48 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// Initialize game (only once)
+// Initialize game
 const game = new Game();
+
+// UI elements
+const speedElement = document.getElementById('speed');
+const damageElement = document.getElementById('damage');
+const damageFillElement = document.getElementById('damage-fill');
+const weatherButtons = document.querySelectorAll('.weather-controls button');
+
+// Update UI
+function updateUI() {
+    // Update speed
+    const speed = Math.round(game.car.speed * 3.6); // Convert m/s to km/h
+    speedElement.textContent = speed;
+
+    // Update damage
+    const damage = Math.min(100, Math.round(game.car.damage));
+    damageElement.textContent = damage;
+    damageFillElement.style.width = `${damage}%`;
+
+    // Update damage bar color
+    const hue = (100 - damage) * 1.2; // Green (120) to Red (0)
+    damageFillElement.style.backgroundColor = `hsl(${hue}, 100%, 50%)`;
+
+    // Request next frame
+    requestAnimationFrame(updateUI);
+}
+
+// Start UI updates
+updateUI();
+
+// Weather controls
+weatherButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        const weather = button.dataset.weather;
+        game.setWeather(weather);
+        
+        // Update active button
+        weatherButtons.forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
+    });
+});
 
 // Add keyboard controls help
 const helpElement = document.createElement('div');

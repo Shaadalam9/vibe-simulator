@@ -4,22 +4,41 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Slow Roads Simulator</title>
+    <title>Vibe Simulator</title>
     <link rel="stylesheet" href="/src/style.css">
   </head>
   <body>
-    <div class="loading">
-      <h1>Slow Roads Simulator</h1>
-      <p>Loading game assets...</p>
+    <div class="loading">Loading...</div>
+
+    <div class="ui-container">
+      <div class="speed-meter">
+        Speed: <span id="speed">0</span> km/h
+      </div>
+      <div class="damage-meter">
+        Damage: <span id="damage">0</span>%
+        <div class="damage-bar">
+          <div class="damage-fill" id="damage-fill"></div>
+        </div>
+      </div>
     </div>
-    <div class="controls">
-      <h2>Controls</h2>
-      <p>W - Accelerate</p>
-      <p>S - Reverse</p>
+
+    <div class="controls-info">
+      <h3>Controls</h3>
+      <p>W/S - Accelerate/Brake</p>
       <p>A/D - Steer</p>
       <p>Space - Handbrake</p>
-      <p>B - Brake</p>
+      <p>C - Change Camera</p>
+      <p>R - Reset Car</p>
     </div>
+
+    <div class="weather-controls">
+      <h3>Weather</h3>
+      <button data-weather="clear">Clear</button>
+      <button data-weather="rainy">Rain</button>
+      <button data-weather="snowy">Snow</button>
+      <button data-weather="foggy">Fog</button>
+    </div>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
