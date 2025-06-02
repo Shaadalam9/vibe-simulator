@@ -316,24 +316,59 @@ class Game {
     }
 
     createRoads() {
-        this.roadGenerator = new RoadGenerator(this.scene, this.terrain);
-        
-        // Generate a network of roads
-        const startPoints = [
-            { x: 0, z: 0, y: 0 },
-            { x: 100, z: 100, y: 0 },
-            { x: -100, z: 100, y: 0 },
-            { x: 100, z: -100, y: 0 },
-            { x: -100, z: -100, y: 0 }
-        ];
-
-        startPoints.forEach(point => {
-            this.roadGenerator.generateRoad(point, 500, 1.5);
+        // Load road texture
+        const textureLoader = new THREE.TextureLoader();
+        const roadTexture = textureLoader.load('/textures/road.jpg', (texture) => {
+            // Texture loaded callback (optional)
+            console.log('Road texture loaded.');
+        }, undefined, (error) => {
+            console.error('Error loading road texture:', error);
         });
+
+        // Set texture repeat for tiling
+        const textureRepeat = 1000; // Adjust repeat based on road length and texture size
+        roadTexture.wrapS = roadTexture.wrapT = THREE.RepeatWrapping;
+        roadTexture.repeat.set(1, textureRepeat); // Repeat along the length of the road
+
+        this.roadGenerator = new RoadGenerator(this.scene, this.terrain, roadTexture); // Pass texture to generator
+        
+        // Generate a single, long road starting from the car's initial position
+        // Assuming the car is created before the roads
+        const startPoint = new THREE.Vector3(0, 0, 0); // Start road at origin for now
+        const roadLength = 50000; // Make the road much longer
+        const curvature = 1.5; // Keep existing curvature
+
+        this.roadPoints = this.roadGenerator.generateRoadPoints(startPoint, roadLength, curvature);
+        const roadGeometry = this.roadGenerator.createRoadGeometry(this.roadPoints);
+        const road = new THREE.Mesh(roadGeometry, this.roadGenerator.roadMaterial);
+        road.receiveShadow = true;
+        this.scene.add(road);
+        this.roads = [road]; // Store the single road mesh
+
+        console.log('Single long road created.');
     }
 
     createCar(carBodyMaterial, wheelMaterial) {
-        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(0, 200, 0));
+        // Get the starting position and direction from the first road point
+        if (!this.roadPoints || this.roadPoints.length < 2) {
+            console.error('Road points not available or insufficient for car placement.');
+            // Fallback to a default position if road points are not ready
+            this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(0, 200, 0));
+            return;
+        }
+
+        const startPoint = this.roadPoints[0];
+        const nextPoint = this.roadPoints[1];
+        const initialDirection = new THREE.Vector3().subVectors(nextPoint, startPoint).normalize();
+
+        // Calculate initial rotation quaternion based on the direction
+        const upVector = new THREE.Vector3(0, 1, 0); // Assuming Y is up
+        const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), initialDirection.negate()); // Car initially faces +Z, road direction is movement direction
+
+        // Create the car at the starting road point with the calculated rotation
+        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(startPoint.x, startPoint.y + 0.5, startPoint.z), quaternion); // Add slight offset above road
+
+        console.log('Car created at road start.');
     }
 
     createWheels() {

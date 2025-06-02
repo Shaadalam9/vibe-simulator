@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es/dist/cannon-es.js';
 
 export class Car {
-    constructor(scene, world, carBodyMaterial, wheelMaterial, initialPosition) {
+    constructor(scene, world, carBodyMaterial, wheelMaterial, initialPosition, initialQuaternion) {
         this.scene = scene;
         this.world = world;
         this.carBodyMaterial = carBodyMaterial;
         this.wheelMaterial = wheelMaterial;
         this.initialPosition = initialPosition || new CANNON.Vec3(0, 200, 0);
+        this.initialQuaternion = initialQuaternion || new CANNON.Quaternion();
         
         // Car properties
         this.maxSteerVal = 0.5;
@@ -42,7 +43,8 @@ export class Car {
             mass: 1500,
             position: this.initialPosition,
             shape: shape,
-            material: this.carBodyMaterial
+            material: this.carBodyMaterial,
+            quaternion: this.initialQuaternion
         });
         this.world.addBody(this.physicsBody);
 
@@ -245,7 +247,7 @@ export class Car {
          this.physicsBody.position.copy(this.initialPosition);
          this.physicsBody.velocity.set(0, 0, 0);
          this.physicsBody.angularVelocity.set(0, 0, 0);
-         this.physicsBody.quaternion.set(0, 0, 0, 1); // Reset rotation
+         this.physicsBody.quaternion.copy(this.initialQuaternion);
          this.damage = 0;
          this.vehicle.reset(); // Reset the RaycastVehicle
      }

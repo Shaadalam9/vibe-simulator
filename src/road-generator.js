@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 
 export class RoadGenerator {
-    constructor(scene, terrain) {
+    constructor(scene, terrain, roadTexture) {
         this.scene = scene;
         this.terrain = terrain;
         this.noise = createNoise2D();
         this.roads = [];
         this.roadWidth = 8;
         this.roadMaterial = new THREE.MeshStandardMaterial({
-            color: 0x333333,
+            map: roadTexture,
             roughness: 0.8,
             metalness: 0.2
         });
