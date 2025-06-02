@@ -67,6 +67,20 @@ class Game {
         } else {
             console.log('Loading element not found.');
         }
+
+        // Hide other loading indicators that might be in the HTML
+        const titleElement = document.querySelector('h1');
+        if (titleElement && titleElement.textContent.includes('Slow Roads Simulator')) {
+            titleElement.style.display = 'none';
+        }
+
+        const loadingTextElement = document.querySelector('p');
+        if (loadingTextElement && loadingTextElement.textContent.includes('Loading game assets...')) {
+            loadingTextElement.style.display = 'none';
+        }
+
+         const canvas = this.renderer.domElement;
+         canvas.style.display = 'block'; // Ensure canvas is visible
     }
 
     createSky() {
