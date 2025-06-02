@@ -3,9 +3,10 @@ import { createNoise2D } from 'simplex-noise';
 import * as CANNON from 'cannon-es';
 
 export class Terrain {
-    constructor(scene, world) {
+    constructor(scene, world, terrainMaterial) {
         this.scene = scene;
         this.world = world;
+        this.terrainMaterial = terrainMaterial;
         this.size = 1000;
         this.resolution = 128;
         this.heightScale = 30;
@@ -119,7 +120,7 @@ export class Terrain {
         const body = new CANNON.Body({
             mass: 0,
             shape: shape,
-            material: new CANNON.Material('terrainMaterial')
+            material: this.terrainMaterial
         });
         
         body.position.set(
