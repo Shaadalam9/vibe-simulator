@@ -1,269 +1,285 @@
-import * as THREE from 'three';
-import * as CANNON from 'cannon-es/dist/cannon-es.js';
+import * as THREE from "three"; import * as CANNON from "cannon-es/dist/cannon-es.js";
 
 export class Car {
-    constructor(scene, world, carBodyMaterial, wheelMaterial, initialPosition, initialQuaternion) {
+    constructor(scene, world, bodyMaterial, wheelMaterial, position, quaternion) {
         this.scene = scene;
         this.world = world;
-        this.carBodyMaterial = carBodyMaterial;
+        this.bodyMaterial = bodyMaterial;
         this.wheelMaterial = wheelMaterial;
-        this.initialPosition = initialPosition || new CANNON.Vec3(0, 200, 0);
-        this.initialQuaternion = initialQuaternion || new CANNON.Quaternion();
+        this.position = position;
+        this.quaternion = quaternion;
         
         // Car properties
-        this.maxSteerVal = 0.5;
-        this.maxForce = 1500;
-        this.brakeForce = 100;
-        this.maxSpeed = 50;
-        this.acceleration = 0.5;
-        this.deceleration = 0.3;
-        this.steeringSpeed = 0.05;
-        this.currentSteering = 0;
-        this.currentSpeed = 0;
-        
-        // Car state
+        this.maxSpeed = 50; // Reduced for more realistic speeds
+        this.acceleration = 10;
+        this.brakingForce = 20;
+        this.handbrakeForce = 30;
+        this.steeringSpeed = 2.5;
+        this.maxSteeringAngle = Math.PI / 4;
+        this.currentSteeringAngle = 0;
         this.speed = 0;
-        this.steering = 0;
-        this.engineForce = 0;
-        this.breakingForce = 0;
-        this.damage = 0; // Initialize damage property
+        this.damage = 0;
         
-        this.init();
-        this.setupSounds(); // Setup sounds after initialization
-    }
-
-    init() {
         // Create car body
-        const bodyGeometry = new THREE.BoxGeometry(2, 0.5, 4);
-        const bodyMaterial = new THREE.MeshPhongMaterial({
-            color: 0x4444ff,
-            shininess: 100
-        });
-        this.body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        this.body.castShadow = true;
-        this.scene.add(this.body);
-
-        // Create car physics body
-        const shape = new CANNON.Box(new CANNON.Vec3(1, 0.25, 2));
-        this.physicsBody = new CANNON.Body({
-            mass: 1500,
-            position: this.initialPosition,
-            shape: shape,
-            material: this.carBodyMaterial,
-            quaternion: this.initialQuaternion
-        });
-        this.world.addBody(this.physicsBody);
-
+        this.createBody();
+        
         // Create wheels
         this.createWheels();
         
         // Create vehicle
         this.createVehicle();
+    }
 
-        // Initial sync of visual position
-        this.body.position.copy(this.physicsBody.position);
-        this.body.quaternion.copy(this.physicsBody.quaternion);
-
-        // Add collision detection
-        this.physicsBody.addEventListener('collide', (event) => {
-            const relativeVelocity = event.contact.getImpactVelocityAlongNormal();
-            if (Math.abs(relativeVelocity) > 5) { // Threshold for significant impact
-                this.damage += Math.abs(relativeVelocity) * 0.1; // Increase damage based on impact strength
-                if (this.impactSound && !this.impactSound.isPlaying) {
-                     this.impactSound.play();
-                }
-            }
+    createBody() {
+        // Create car body geometry with more detail
+        const bodyGeometry = new THREE.BoxGeometry(2, 0.5, 4);
+        const bodyMaterial = new THREE.MeshStandardMaterial({
+            color: 0x1a1a1a,
+            metalness: 0.8,
+            roughness: 0.2
         });
+        
+        this.body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        this.body.castShadow = true;
+        this.body.receiveShadow = true;
+        
+        // Add car details
+        this.addCarDetails();
+    }
+
+    addCarDetails() {
+        // Add windshield
+        const windshieldGeometry = new THREE.BoxGeometry(1.8, 0.8, 1.5);
+        const glassMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0x88ccff,
+            metalness: 0,
+            roughness: 0,
+            transmission: 0.9,
+            transparent: true,
+            opacity: 0.3
+        });
+        
+        const windshield = new THREE.Mesh(windshieldGeometry, glassMaterial);
+        windshield.position.set(0, 0.65, -0.5);
+        windshield.castShadow = true;
+        this.body.add(windshield);
+        
+        // Add headlights
+        const headlightGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+        const headlightMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffcc,
+            emissive: 0xffffcc,
+            emissiveIntensity: 0.5
+        });
+        
+        const leftHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+        leftHeadlight.position.set(-0.8, 0.3, 2);
+        this.body.add(leftHeadlight);
+        
+        const rightHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+        rightHeadlight.position.set(0.8, 0.3, 2);
+        this.body.add(rightHeadlight);
+        
+        // Add taillights
+        const taillightGeometry = new THREE.BoxGeometry(0.3, 0.2, 0.1);
+        const taillightMaterial = new THREE.MeshStandardMaterial({
+            color: 0xff0000,
+            emissive: 0xff0000,
+            emissiveIntensity: 0.5
+        });
+        
+        const leftTaillight = new THREE.Mesh(taillightGeometry, taillightMaterial);
+        leftTaillight.position.set(-0.8, 0.3, -2);
+        this.body.add(leftTaillight);
+        
+        const rightTaillight = new THREE.Mesh(taillightGeometry, taillightMaterial);
+        rightTaillight.position.set(0.8, 0.3, -2);
+        this.body.add(rightTaillight);
     }
 
     createWheels() {
-        const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 32);
-        const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+        const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
+        wheelGeometry.rotateZ(Math.PI / 2);
+        
         this.wheels = [];
-
-        // Wheel positions relative to the car body center
         const wheelPositions = [
-            { x: -1, y: -0.25, z: 1.5 },  // Front left
-            { x: 1, y: -0.25, z: 1.5 },   // Front right
-            { x: -1, y: -0.25, z: -1.5 }, // Rear left
-            { x: 1, y: -0.25, z: -1.5 }   // Rear right
+            [-1, -0.3, 1.5],  // Front left
+            [1, -0.3, 1.5],   // Front right
+            [-1, -0.3, -1.5], // Rear left
+            [1, -0.3, -1.5]   // Rear right
         ];
-
-        wheelPositions.forEach(pos => {
-            // Visual wheel
-            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            wheel.position.set(pos.x, pos.y, pos.z);
-            wheel.rotation.z = Math.PI / 2;
-            this.scene.add(wheel); // Add wheels directly to scene
+        
+        wheelPositions.forEach(position => {
+            const wheel = new THREE.Mesh(wheelGeometry, this.wheelMaterial);
+            wheel.position.set(...position);
+            wheel.castShadow = true;
             this.wheels.push(wheel);
-
-            // Physics wheel (placeholder, RaycastVehicle creates actual wheel physics bodies)
-            // We still need a placeholder visual wheel to attach to the RaycastVehicle later
+            this.body.add(wheel);
         });
     }
 
     createVehicle() {
-        const options = {
-            radius: 0.4,
-            directionLocal: new CANNON.Vec3(0, -1, 0), // Wheel direction (downwards)
-            suspensionStiffness: 50, // Increased stiffness
-            suspensionRestLength: 0.5, // Adjusted rest length (increased)
-            frictionSlip: 0.8, // Reduced friction slip
-            dampingRelaxation: 3, // Adjusted damping
-            dampingCompression: 4.5, // Adjusted damping
-            maxSuspensionForce: 100000,
-            rollInfluence: 0.01,
-            axleLocal: new CANNON.Vec3(0, 0, 1), // Axle direction
-            // Adjusted connection points to be slightly lower relative to the chassis bottom
-            chassisConnectionPointLocal: new CANNON.Vec3(1, -0.3, 1),
-            maxSuspensionTravel: 0.5, // Increased travel
-            customSlidingRotationalSpeed: -30,
-            useCustomSlidingRotationalSpeed: true
-        };
-
+        // Create car physics body
+        const shape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
+        this.physicsBody = new CANNON.Body({
+            mass: 1500,
+            position: new CANNON.Vec3(this.position.x, this.position.y, this.position.z),
+            shape: shape,
+            material: this.bodyMaterial
+        });
+        this.physicsBody.quaternion.copy(this.quaternion);
+        this.world.addBody(this.physicsBody);
+        
+        // Create vehicle
         this.vehicle = new CANNON.RaycastVehicle({
             chassisBody: this.physicsBody,
             indexRightAxis: 0,
-            indexForwardAxis: 2,
-            indexUpAxis: 1
+            indexUpAxis: 1,
+            indexForwardAxis: 2
         });
-
-        // Add wheels with their connection points
-        const wheelInfos = [
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(-1, -0.3, 1.5) },  // Front left
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(1, -0.3, 1.5) },   // Front right
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(-1, -0.3, -1.5) }, // Rear left
-            { ...options, chassisConnectionPointLocal: new CANNON.Vec3(1, -0.3, -1.5) }   // Rear right
-        ];
-
-        wheelInfos.forEach(info => {
-            this.vehicle.addWheel(info);
+        
+        // Add wheels with improved physics properties
+        const wheelOptions = {
+            radius: 0.4,
+            directionLocal: new CANNON.Vec3(0, -1, 0),
+            suspensionStiffness: 45,
+            suspensionRestLength: 0.2,
+            frictionSlip: 5,
+            dampingRelaxation: 2.3,
+            dampingCompression: 4.4,
+            maxSuspensionForce: 100000,
+            rollInfluence: 0.01,
+            axleLocal: new CANNON.Vec3(-1, 0, 0),
+            chassisConnectionPointLocal: new CANNON.Vec3(),
+            maxSuspensionTravel: 0.3,
+            customSlidingRotationalSpeed: -30,
+            useCustomSlidingRotationalSpeed: true
+        };
+        
+        const axleWidth = 1.6;
+        const wheelBase = 1.5;
+        
+        // Add wheels with proper positioning
+        this.vehicle.addWheel({
+            ...wheelOptions,
+            chassisConnectionPointLocal: new CANNON.Vec3(-axleWidth/2, -0.3, wheelBase)
         });
-
+        this.vehicle.addWheel({
+            ...wheelOptions,
+            chassisConnectionPointLocal: new CANNON.Vec3(axleWidth/2, -0.3, wheelBase)
+        });
+        this.vehicle.addWheel({
+            ...wheelOptions,
+            chassisConnectionPointLocal: new CANNON.Vec3(-axleWidth/2, -0.3, -wheelBase)
+        });
+        this.vehicle.addWheel({
+            ...wheelOptions,
+            chassisConnectionPointLocal: new CANNON.Vec3(axleWidth/2, -0.3, -wheelBase)
+        });
+        
         this.vehicle.addToWorld(this.world);
-
-        // Get physics wheel bodies from the vehicle (needed for syncing visual wheels)
-        this.wheelBodies = this.vehicle.wheelBodies;
     }
 
-    setupSounds() {
-        // Create audio listener
-        this.listener = new THREE.AudioListener();
-        this.scene.add(this.listener); // Add listener to the scene
-
-        // Engine sound
-        this.engineSound = new THREE.Audio(this.listener);
-        const audioLoader = new THREE.AudioLoader();
-        audioLoader.load('/sounds/engine.mp3', (buffer) => {
-            this.engineSound.setBuffer(buffer);
-            this.engineSound.setLoop(true);
-            this.engineSound.setVolume(0.5);
-            // Start playing on user interaction, e.g., first acceleration
-        });
-
-        // Impact sound
-        this.impactSound = new THREE.Audio(this.listener);
-        audioLoader.load('/sounds/impact.mp3', (buffer) => {
-            this.impactSound.setBuffer(buffer);
-            this.impactSound.setVolume(0.3);
-        });
-
-        // Tire screech sound
-        this.tireSound = new THREE.Audio(this.listener);
-        audioLoader.load('/sounds/tire-screech.mp3', (buffer) => {
-            this.tireSound.setBuffer(buffer);
-            this.tireSound.setLoop(true);
-            this.tireSound.setVolume(0.2);
-            // Start playing when tire slip occurs (this would require more advanced physics checks)
-        });
+    update(deltaTime, keys) {
+        // Update car physics
+        this.updatePhysics(deltaTime, keys);
+        
+        // Update visual representation
+        this.updateVisuals();
+        
+        // Update damage based on collisions
+        this.updateDamage();
     }
 
-    update(deltaTime, controls) {
-        // Update engine sound playback rate and volume based on speed
-        if (this.engineSound && this.engineSound.isPlaying) {
-            this.engineSound.setPlaybackRate(0.5 + Math.abs(this.speed) / 30);
-            this.engineSound.setVolume(0.3 + Math.abs(this.speed) / 100);
-        }
-
-        // Calculate target speed based on controls
-        let targetSpeed = 0;
-        if (controls.forward) {
-            targetSpeed = this.maxSpeed;
-        } else if (controls.backward) {
-            targetSpeed = -this.maxSpeed * 0.5; // Reverse is slower
-        }
-
-        // Gradually change current speed
-        if (targetSpeed > this.currentSpeed) {
-            this.currentSpeed = Math.min(targetSpeed, this.currentSpeed + this.acceleration);
-        } else if (targetSpeed < this.currentSpeed) {
-            this.currentSpeed = Math.max(targetSpeed, this.currentSpeed - this.deceleration);
-        }
-
-        // Apply engine force based on current speed
-        this.engineForce = this.currentSpeed * this.maxForce / this.maxSpeed;
-        this.vehicle.applyEngineForce(this.engineForce, 2);
-        this.vehicle.applyEngineForce(this.engineForce, 3);
-
-        // Calculate target steering
-        let targetSteering = 0;
-        if (controls.left) {
-            targetSteering = -this.maxSteerVal;
-        } else if (controls.right) {
-            targetSteering = this.maxSteerVal;
-        }
-
-        // Gradually change current steering
-        if (targetSteering > this.currentSteering) {
-            this.currentSteering = Math.min(targetSteering, this.currentSteering + this.steeringSpeed);
-        } else if (targetSteering < this.currentSteering) {
-            this.currentSteering = Math.max(targetSteering, this.currentSteering - this.steeringSpeed);
-        }
-
-        // Apply steering to front wheels
-        this.vehicle.setSteeringValue(this.currentSteering, 0);
-        this.vehicle.setSteeringValue(this.currentSteering, 1);
-
-        // Apply brake force to all wheels
-        this.breakingForce = controls.brake ? this.brakeForce : 0;
-        for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
-            this.vehicle.setBrake(this.breakingForce, i);
+    updatePhysics(deltaTime, keys) {
+        // Get current speed
+        const velocity = this.physicsBody.velocity;
+        this.speed = Math.sqrt(
+            velocity.x * velocity.x +
+            velocity.y * velocity.y +
+            velocity.z * velocity.z
+        );
+        
+        // Handle acceleration and braking
+        if (keys.forward) {
+            this.vehicle.applyEngineForce(this.acceleration * 1000, 2);
+            this.vehicle.applyEngineForce(this.acceleration * 1000, 3);
+        } else if (keys.backward) {
+            this.vehicle.applyEngineForce(-this.acceleration * 1000, 2);
+            this.vehicle.applyEngineForce(-this.acceleration * 1000, 3);
+        } else {
+            this.vehicle.applyEngineForce(0, 2);
+            this.vehicle.applyEngineForce(0, 3);
         }
         
-        // Handbrake (applies brake to rear wheels)
-        const handbrakeForce = controls.handbrake ? this.brakeForce * 2 : 0;
-        this.vehicle.setBrake(handbrakeForce, 2);
-        this.vehicle.setBrake(handbrakeForce, 3);
+        // Handle steering
+        if (keys.left) {
+            this.currentSteeringAngle = Math.min(
+                this.currentSteeringAngle + this.steeringSpeed * deltaTime,
+                this.maxSteeringAngle
+            );
+        } else if (keys.right) {
+            this.currentSteeringAngle = Math.max(
+                this.currentSteeringAngle - this.steeringSpeed * deltaTime,
+                -this.maxSteeringAngle
+            );
+        } else {
+            // Return steering to center
+            if (this.currentSteeringAngle > 0) {
+                this.currentSteeringAngle = Math.max(0, this.currentSteeringAngle - this.steeringSpeed * deltaTime);
+            } else if (this.currentSteeringAngle < 0) {
+                this.currentSteeringAngle = Math.min(0, this.currentSteeringAngle + this.steeringSpeed * deltaTime);
+            }
+        }
+        
+        // Apply steering angle
+        this.vehicle.setSteeringValue(this.currentSteeringAngle, 0);
+        this.vehicle.setSteeringValue(this.currentSteeringAngle, 1);
+        
+        // Handle braking
+        if (keys.brake) {
+            this.vehicle.setBrake(this.brakingForce, 0);
+            this.vehicle.setBrake(this.brakingForce, 1);
+            this.vehicle.setBrake(this.brakingForce, 2);
+            this.vehicle.setBrake(this.brakingForce, 3);
+        } else if (keys.handbrake) {
+            this.vehicle.setBrake(this.handbrakeForce, 2);
+            this.vehicle.setBrake(this.handbrakeForce, 3);
+        } else {
+            this.vehicle.setBrake(0, 0);
+            this.vehicle.setBrake(0, 1);
+            this.vehicle.setBrake(0, 2);
+            this.vehicle.setBrake(0, 3);
+        }
+    }
 
-        // Update visual position and rotation of car body
+    updateVisuals() {
+        // Update car body position and rotation
         this.body.position.copy(this.physicsBody.position);
         this.body.quaternion.copy(this.physicsBody.quaternion);
-
-        // Update visual position and rotation of wheels
+        
+        // Update wheel rotations
         for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
             this.vehicle.updateWheelTransform(i);
             const transform = this.vehicle.wheelInfos[i].worldTransform;
+            
             this.wheels[i].position.copy(transform.position);
             this.wheels[i].quaternion.copy(transform.quaternion);
         }
+    }
 
-        // Update speed
-        this.speed = this.physicsBody.velocity.length();
-
-        // Basic tire screech logic
-        if ((controls.handbrake || Math.abs(this.currentSteering) > 0.3) && this.speed > 5) {
-            if (this.tireSound && !this.tireSound.isPlaying) {
-                this.tireSound.play();
-            }
-        } else {
-            if (this.tireSound && this.tireSound.isPlaying) {
-                this.tireSound.stop();
-            }
-        }
-
-        // Start engine sound on first acceleration
-        if (this.engineSound && !this.engineSound.isPlaying && (controls.forward || controls.backward)) {
-            this.engineSound.play();
+    updateDamage() {
+        // Calculate damage based on collisions
+        const velocity = this.physicsBody.velocity;
+        const impact = Math.sqrt(
+            velocity.x * velocity.x +
+            velocity.y * velocity.y +
+            velocity.z * velocity.z
+        );
+        
+        if (impact > 10) {
+            this.damage += (impact - 10) * 0.01;
+            this.damage = Math.min(this.damage, 1);
         }
     }
 
@@ -271,20 +287,11 @@ export class Car {
         return this.physicsBody.position;
     }
 
-    getRotation() {
-        return this.physicsBody.quaternion;
+    getSpeed() {
+        return this.speed;
     }
 
     getDamage() {
         return this.damage;
     }
-
-     reset() {
-         this.physicsBody.position.copy(this.initialPosition);
-         this.physicsBody.velocity.set(0, 0, 0);
-         this.physicsBody.angularVelocity.set(0, 0, 0);
-         this.physicsBody.quaternion.copy(this.initialQuaternion);
-         this.damage = 0;
-         this.vehicle.reset(); // Reset the RaycastVehicle
-     }
 }

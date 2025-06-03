@@ -59,7 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
     weatherButtons.forEach(button => {
         button.addEventListener('click', () => {
             const weather = button.dataset.weather;
-            game.setWeather(weather);
 
             // Update active button
             weatherButtons.forEach(btn => btn.classList.remove('active'));
@@ -106,15 +105,13 @@ document.addEventListener('DOMContentLoaded', () => {
          newWeatherButtons.forEach(button => {
              button.addEventListener('click', () => {
                  const weather = button.dataset.weather;
-                 game.setWeather(weather);
 
                  newWeatherButtons.forEach(btn => btn.classList.remove('active'));
                  button.classList.add('active');
              });
          });
     }
-     game.setWeather('snowy'); // Set initial weather
-     console.log('Weather controls added and initial weather set.');
+    console.log('Weather controls added and initial weather set.');
 
 });
 

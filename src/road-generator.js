@@ -3,192 +3,248 @@ import * as CANNON from 'cannon-es/dist/cannon-es.js';
 import { createNoise2D } from 'simplex-noise';
 
 export class RoadGenerator {
-    constructor(scene, world, roadMaterial) {
+    static roadWidth = 8;
+    static segmentLength = 20;
+    static maxSegments = 1000; // Increased for longer roads
+    static curveIntensity = 0.3; // Reduced for smoother curves
+    static heightVariation = 5; // Reduced for smoother elevation changes
+
+    constructor(scene, world, material) {
         this.scene = scene;
         this.world = world;
-        this.roadMaterial = roadMaterial;
+        this.material = material;
         this.noise = createNoise2D();
         this.roadPoints = [];
-        this.roadSegments = [];
-        this.roadLength = 1000; // Length of road to generate
-        this.segmentLength = 50; // Length of each road segment
-        this.roadWidth = 8; // Width of the road
-        this.curvature = 0.5; // How curvy the road is
-        this.elevation = 0.3; // How hilly the road is
+        this.roadMesh = null;
+        this.lastGeneratedPoint = null;
+        this.generationDistance = 1000; // Distance ahead to generate new road
+        this.cleanupDistance = 2000; // Distance behind to remove old road
+        this.segments = [];
+        this.currentSegment = 0;
         
-        // Initialize road
+        // Initialize road generation
         this.generateInitialRoad();
     }
 
     generateInitialRoad() {
         // Generate initial road points
-        let x = 0;
-        let z = 0;
-        let angle = 0;
+        let currentPoint = new THREE.Vector3(0, 0, 0);
+        let currentDirection = new THREE.Vector3(0, 0, 1);
+        let currentHeight = 0;
 
-        for (let i = 0; i < this.roadLength; i += this.segmentLength) {
-            // Use noise to create natural-looking curves
-            const noiseValue = this.noise(x * 0.01, z * 0.01);
-            angle += noiseValue * this.curvature;
+        for (let i = 0; i < RoadGenerator.maxSegments; i++) {
+            // Generate next point with improved procedural generation
+            const nextPoint = this.generateNextPoint(currentPoint, currentDirection, currentHeight);
+            this.roadPoints.push(nextPoint);
             
-            // Calculate elevation using a different noise value
-            const elevationNoise = this.noise(x * 0.02, z * 0.02);
-            const y = elevationNoise * this.elevation * 100;
-
-            // Calculate next point
-            x += Math.cos(angle) * this.segmentLength;
-            z += Math.sin(angle) * this.segmentLength;
-
-            // Add point to road
-            this.roadPoints.push(new THREE.Vector3(x, y, z));
+            // Update current values for next iteration
+            currentDirection = new THREE.Vector3().subVectors(nextPoint, currentPoint).normalize();
+            currentPoint = nextPoint;
+            currentHeight = nextPoint.y;
         }
 
-        // Create road mesh
+        // Create initial road mesh
         this.createRoadMesh();
+    }
+
+    generateNextPoint(currentPoint, currentDirection, currentHeight) {
+        // Use multiple octaves of noise for more natural curves
+        const noiseScale = 0.01;
+        const noise1 = this.noise(currentPoint.x * noiseScale, currentPoint.z * noiseScale);
+        const noise2 = this.noise(currentPoint.x * noiseScale * 2, currentPoint.z * noiseScale * 2) * 0.5;
+        const noise3 = this.noise(currentPoint.x * noiseScale * 4, currentPoint.z * noiseScale * 4) * 0.25;
+        
+        // Combine noise values for smoother curves
+        const curveFactor = (noise1 + noise2 + noise3) * RoadGenerator.curveIntensity;
+        
+        // Calculate height variation using noise
+        const heightNoise = this.noise(currentPoint.x * noiseScale * 0.5, currentPoint.z * noiseScale * 0.5);
+        const heightChange = heightNoise * RoadGenerator.heightVariation;
+        
+        // Create rotation matrix for the curve
+        const rotationMatrix = new THREE.Matrix4().makeRotationY(curveFactor);
+        
+        // Apply rotation to direction
+        const newDirection = currentDirection.clone().applyMatrix4(rotationMatrix);
+        
+        // Calculate next point
+        const nextPoint = currentPoint.clone().add(
+            newDirection.multiplyScalar(RoadGenerator.segmentLength)
+        );
+        
+        // Apply height change smoothly
+        nextPoint.y = currentHeight + heightChange;
+        
+        return nextPoint;
     }
 
     createRoadMesh() {
         // Create road geometry
-        const roadGeometry = new THREE.BufferGeometry();
+        const geometry = new THREE.BufferGeometry();
         const vertices = [];
         const indices = [];
         const uvs = [];
+        const normals = [];
 
-        // Generate road vertices
+        // Generate road mesh data
         for (let i = 0; i < this.roadPoints.length - 1; i++) {
-            const current = this.roadPoints[i];
-            const next = this.roadPoints[i + 1];
+            const p1 = this.roadPoints[i];
+            const p2 = this.roadPoints[i + 1];
             
-            // Calculate road direction
-            const direction = new THREE.Vector3().subVectors(next, current).normalize();
-            const perpendicular = new THREE.Vector3(-direction.z, 0, direction.x).normalize();
+            // Calculate road segment direction and perpendicular
+            const direction = new THREE.Vector3().subVectors(p2, p1).normalize();
+            const perpendicular = new THREE.Vector3().crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
             
-            // Calculate road width offset
-            const halfWidth = this.roadWidth / 2;
+            // Calculate road edges
+            const halfWidth = RoadGenerator.roadWidth / 2;
+            const leftEdge1 = p1.clone().add(perpendicular.clone().multiplyScalar(-halfWidth));
+            const rightEdge1 = p1.clone().add(perpendicular.clone().multiplyScalar(halfWidth));
+            const leftEdge2 = p2.clone().add(perpendicular.clone().multiplyScalar(-halfWidth));
+            const rightEdge2 = p2.clone().add(perpendicular.clone().multiplyScalar(halfWidth));
             
-            // Add vertices for this segment
+            // Add vertices
+            const baseIndex = vertices.length / 3;
             vertices.push(
-                current.x + perpendicular.x * halfWidth, current.y, current.z + perpendicular.z * halfWidth,
-                current.x - perpendicular.x * halfWidth, current.y, current.z - perpendicular.z * halfWidth,
-                next.x + perpendicular.x * halfWidth, next.y, next.z + perpendicular.z * halfWidth,
-                next.x - perpendicular.x * halfWidth, next.y, next.z - perpendicular.z * halfWidth
+                leftEdge1.x, leftEdge1.y, leftEdge1.z,
+                rightEdge1.x, rightEdge1.y, rightEdge1.z,
+                leftEdge2.x, leftEdge2.y, leftEdge2.z,
+                rightEdge2.x, rightEdge2.y, rightEdge2.z
             );
-
-            // Add indices for triangles
-            const baseIndex = i * 4;
+            
+            // Add indices for two triangles
             indices.push(
                 baseIndex, baseIndex + 1, baseIndex + 2,
                 baseIndex + 1, baseIndex + 3, baseIndex + 2
             );
-
+            
             // Add UVs
-            uvs.push(
-                0, i / this.roadPoints.length,
-                1, i / this.roadPoints.length,
-                0, (i + 1) / this.roadPoints.length,
-                1, (i + 1) / this.roadPoints.length
-            );
+            uvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+            
+            // Add normals
+            const normal = new THREE.Vector3().crossVectors(
+                new THREE.Vector3().subVectors(rightEdge1, leftEdge1),
+                new THREE.Vector3().subVectors(leftEdge2, leftEdge1)
+            ).normalize();
+            
+            for (let j = 0; j < 4; j++) {
+                normals.push(normal.x, normal.y, normal.z);
+            }
         }
-
-        // Set attributes
-        roadGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        roadGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        roadGeometry.setIndex(indices);
-
-        // Create road mesh
-        this.roadMesh = new THREE.Mesh(roadGeometry, this.roadMaterial);
+        
+        // Set geometry attributes
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        
+        // Create and add road mesh
+        this.roadMesh = new THREE.Mesh(geometry, this.material);
         this.roadMesh.receiveShadow = true;
         this.scene.add(this.roadMesh);
-
-        // Create road physics
+        
+        // Create physics body for the road
         this.createRoadPhysics();
     }
 
     createRoadPhysics() {
-        // Create road physics bodies
+        // Create physics body for the road
+        const shape = new CANNON.Box(new CANNON.Vec3(
+            RoadGenerator.roadWidth / 2,
+            0.1,
+            RoadGenerator.segmentLength / 2
+        ));
+        
+        // Create physics bodies for each road segment
         for (let i = 0; i < this.roadPoints.length - 1; i++) {
-            const current = this.roadPoints[i];
-            const next = this.roadPoints[i + 1];
+            const p1 = this.roadPoints[i];
+            const p2 = this.roadPoints[i + 1];
             
-            // Create road segment physics
-            const roadShape = new CANNON.Box(new CANNON.Vec3(this.roadWidth / 2, 0.1, this.segmentLength / 2));
-            const roadBody = new CANNON.Body({
-                mass: 0, // Static body
-                position: new CANNON.Vec3(
-                    (current.x + next.x) / 2,
-                    (current.y + next.y) / 2,
-                    (current.z + next.z) / 2
-                ),
-                shape: roadShape
+            // Calculate segment center and rotation
+            const center = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+            const direction = new THREE.Vector3().subVectors(p2, p1).normalize();
+            const rotation = new THREE.Quaternion().setFromUnitVectors(
+                new THREE.Vector3(0, 0, 1),
+                direction
+            );
+            
+            // Create physics body
+            const body = new CANNON.Body({
+                mass: 0,
+                shape: shape,
+                position: new CANNON.Vec3(center.x, center.y, center.z),
+                quaternion: new CANNON.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)
             });
-
-            // Calculate rotation to align with road direction
-            const direction = new THREE.Vector3().subVectors(next, current).normalize();
-            const angle = Math.atan2(direction.x, direction.z);
-            roadBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
-
-            this.world.addBody(roadBody);
-            this.roadSegments.push(roadBody);
+            
+            this.world.addBody(body);
         }
     }
 
     update(carPosition) {
-        // Check if we need to generate more road
-        const lastPoint = this.roadPoints[this.roadPoints.length - 1];
-        const distanceToLastPoint = carPosition.distanceTo(lastPoint);
+        // Log car position and road point count for debugging generation
+        console.log('RoadGenerator update - Car Position:', carPosition.x, carPosition.y, carPosition.z, 'Road Points:', this.roadPoints.length);
 
-        if (distanceToLastPoint < this.roadLength * 0.5) {
-            this.generateMoreRoad();
+        // Check if we need to generate more road ahead
+        if (this.roadPoints.length > 0) {
+            const lastPoint = this.roadPoints[this.roadPoints.length - 1];
+            const distanceToLastPoint = carPosition.distanceTo(lastPoint);
+            
+            if (distanceToLastPoint < this.generationDistance) {
+                this.generateMoreRoad();
+            }
+            
+            // Clean up old road segments
+            this.cleanupOldRoad(carPosition);
         }
     }
 
     generateMoreRoad() {
-        // Remove old road segments
-        const removeCount = Math.floor(this.roadPoints.length * 0.2);
-        this.roadPoints.splice(0, removeCount);
-
-        // Remove old physics bodies
-        for (let i = 0; i < removeCount; i++) {
-            if (this.roadSegments[i]) {
-                this.world.removeBody(this.roadSegments[i]);
-            }
+        console.log('Generating more road...');
+        // Generate more road points
+        const currentPoint = this.roadPoints[this.roadPoints.length - 1];
+        const currentDirection = new THREE.Vector3().subVectors(
+            currentPoint,
+            this.roadPoints[this.roadPoints.length - 2]
+        ).normalize();
+        
+        const currentHeight = currentPoint.y;
+        
+        // Generate new segments
+        for (let i = 0; i < 10; i++) {
+            const nextPoint = this.generateNextPoint(currentPoint, currentDirection, currentHeight);
+            this.roadPoints.push(nextPoint);
         }
-        this.roadSegments.splice(0, removeCount);
-
-        // Generate new road points
-        let lastPoint = this.roadPoints[this.roadPoints.length - 1];
-        let angle = Math.atan2(
-            lastPoint.x - this.roadPoints[this.roadPoints.length - 2].x,
-            lastPoint.z - this.roadPoints[this.roadPoints.length - 2].z
-        );
-
-        for (let i = 0; i < removeCount; i++) {
-            const noiseValue = this.noise(lastPoint.x * 0.01, lastPoint.z * 0.01);
-            angle += noiseValue * this.curvature;
-            
-            const elevationNoise = this.noise(lastPoint.x * 0.02, lastPoint.z * 0.02);
-            const y = elevationNoise * this.elevation * 100;
-
-            lastPoint = new THREE.Vector3(
-                lastPoint.x + Math.cos(angle) * this.segmentLength,
-                y,
-                lastPoint.z + Math.sin(angle) * this.segmentLength
-            );
-
-            this.roadPoints.push(lastPoint);
-        }
-
+        
         // Update road mesh
         this.updateRoadMesh();
+        console.log('Finished generating more road. New road points count:', this.roadPoints.length);
+    }
+
+    cleanupOldRoad(carPosition) {
+        console.log('Cleaning up old road...');
+        // Remove road segments that are too far behind
+        const cleanupThreshold = this.cleanupDistance;
+        
+        while (this.roadPoints.length > 0) {
+            const firstPoint = this.roadPoints[0];
+            if (carPosition.distanceTo(firstPoint) > cleanupThreshold) {
+                this.roadPoints.shift();
+            } else {
+                break;
+            }
+        }
+        
+        // Update road mesh after cleanup
+        this.updateRoadMesh();
+        console.log('Finished cleaning up old road. New road points count:', this.roadPoints.length);
     }
 
     updateRoadMesh() {
-        // Remove old road mesh
         if (this.roadMesh) {
+            // Remove old mesh
             this.scene.remove(this.roadMesh);
         }
-
-        // Create new road mesh
+        
+        // Create new mesh with updated points
         this.createRoadMesh();
     }
 

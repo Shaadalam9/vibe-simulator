@@ -3,48 +3,44 @@ import * as CANNON from 'cannon-es/dist/cannon-es.js';
 import { createNoise2D } from 'simplex-noise';
 import { RoadGenerator } from './road-generator.js';
 import { Car } from './Car.js';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
-import { Water } from 'three/examples/jsm/objects/Water.js';
 
 class Game {
     constructor() {
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 20000);
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.world = new CANNON.World();
         this.clock = new THREE.Clock();
         this.noise = createNoise2D();
-        
+
         // Game state
-        this.timeOfDay = 0; // 0-24 hours
-        this.weather = 'clear'; // clear, cloudy, rainy, snowy
-        this.cameraMode = 'chase'; // chase, cockpit, orbit
-        
+        this.keys = {};
+        this.mouse = new THREE.Vector2();
+        this.mouseDown = false;
+        this.cameraRotation = new THREE.Vector2(0, 0);
+        this.cameraMode = 'chase'; // chase, orbit
+        this.cameraDistance = 10; // for orbit camera
+
         this.roadGenerator = null;
-        
+        this.car = null;
+
         this.init();
     }
 
     init() {
-        console.log('Game init() called - Start');
         // Setup renderer
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 0.5;
-        this.renderer.setClearColor(0x87CEEB); // Set sky blue background color
+        this.renderer.toneMappingExposure = 0.8; // Adjusted exposure
         document.body.appendChild(this.renderer.domElement);
-        console.log('Renderer setup complete.');
 
         // Setup camera
         this.camera.position.set(0, 5, -10);
         this.camera.lookAt(0, 0, 0);
-        console.log('Camera setup complete.');
 
         // Setup physics world
         this.world.gravity.set(0, -9.82, 0);
-        console.log('Physics world setup complete.');
 
         // Create physics materials
         this.wheelMaterial = new CANNON.Material('wheelMaterial');
@@ -56,637 +52,104 @@ class Game {
             this.wheelMaterial,
             this.terrainMaterial,
             {
-                friction: 1.5,
-                restitution: 0.1
+                friction: 0.5,
+                restitution: 0.3
             }
         );
         this.world.addContactMaterial(wheelTerrainContact);
 
-        // Create contact material between car body and terrain
-        const bodyTerrainContact = new CANNON.ContactMaterial(
-            this.carBodyMaterial,
-            this.terrainMaterial,
-            {
+         // Create contact material between car body and terrain
+         const bodyTerrainContact = new CANNON.ContactMaterial(
+             this.carBodyMaterial,
+             this.terrainMaterial,
+             {
                 friction: 0.1,
                 restitution: 0.3
-            }
-        );
-        this.world.addContactMaterial(bodyTerrainContact);
-        console.log('Physics materials and contacts setup complete.');
+             }
+         );
+         this.world.addContactMaterial(bodyTerrainContact);
+
 
         // Create environment
         this.createSky();
-        console.log('Sky created.');
         this.createTerrain(this.terrainMaterial);
-        console.log('Terrain created.');
         this.createRoads();
-        console.log('Roads created.');
-        this.createCar(this.carBodyMaterial, this.wheelMaterial);
-        console.log('Car created.');
         this.createLights();
-        console.log('Lights created.');
-        this.createWater();
-        console.log('Water created.');
-        this.createAtmosphere();
-        console.log('Atmosphere created.');
+
+        // Create car
+        this.createCar(this.carBodyMaterial, this.wheelMaterial);
 
         // Setup controls
         this.setupControls();
-        console.log('Controls setup complete.');
 
         // Start animation loop
         this.animate();
-        console.log('Animation loop started.');
 
         // Handle window resize
         window.addEventListener('resize', () => this.onWindowResize(), false);
-        console.log('Window resize listener added.');
-
-        const canvas = this.renderer.domElement;
-        canvas.style.display = 'block';
-        console.log('Canvas display set to block.', canvas);
-        console.log('Game init() called - End');
     }
 
     createSky() {
         // Create a simple sky using a large sphere
-        const skyGeometry = new THREE.SphereGeometry(10000, 32, 32);
-        const skyMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-                topColor: { value: new THREE.Color(0x0077ff) }, // Sky blue
-                bottomColor: { value: new THREE.Color(0xffffff) }, // White
-                offset: { value: 33 },
-                exponent: { value: 0.6 }
-            },
-            vertexShader: `
-                varying vec3 vWorldPosition;
-                void main() {
-                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                    vWorldPosition = worldPosition.xyz;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform vec3 topColor;
-                uniform vec3 bottomColor;
-                uniform float offset;
-                uniform float exponent;
-                varying vec3 vWorldPosition;
-                void main() {
-                    float h = normalize(vWorldPosition + offset).y;
-                    gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
-                }
-            `,
-            side: THREE.BackSide
-        });
-
+        const skyGeometry = new THREE.SphereGeometry(5000, 32, 32);
+        const skyMaterial = new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide }); // Using a light blue color
         this.sky = new THREE.Mesh(skyGeometry, skyMaterial);
         this.scene.add(this.sky);
-
-        // Adjust scene lighting to match the sky
-        if (this.ambientLight) {
-            this.ambientLight.color.set(0xc0c0c0);
-            this.ambientLight.intensity = 0.5;
-        }
     }
 
     createTerrain(terrainMaterial) {
-        const size = 20000;
-        const resolution = 512;
-        const heightScale = 500;
+        const size = 1000;
+        const resolution = 64;
+        const heightScale = 50;
 
         // Create terrain geometry
         const geometry = new THREE.PlaneGeometry(size, size, resolution, resolution);
         geometry.rotateX(-Math.PI / 2);
-        geometry.computeBoundingSphere(); // Compute bounding sphere for frustum culling
-        geometry.computeTangents(); // Compute tangents for normal mapping
 
-        // Generate height map with multiple octaves of noise
+        // Generate height map
         const vertices = geometry.attributes.position.array;
         for (let i = 0; i < vertices.length; i += 3) {
             const x = vertices[i];
             const z = vertices[i + 2];
-            
-            let height = 0;
-            // Base terrain - match visual noise scale
-            height += this.noise(x * 0.0001, z * 0.0001) * heightScale;
-            // Medium detail - match visual noise scale
-            height += this.noise(x * 0.0002, z * 0.0002) * heightScale * 0.5;
-            // Fine detail - match visual noise scale
-            height += this.noise(x * 0.0004, z * 0.0004) * heightScale * 0.25;
-            // Very fine detail - add visual noise scale for consistency
-            height += this.noise(x * 0.0008, z * 0.0008) * heightScale * 0.125;
-            
-            vertices[i + 1] = height;
+            vertices[i + 1] = this.noise(x * 0.01, z * 0.01) * heightScale;
         }
 
         geometry.computeVertexNormals();
 
-        // Create terrain material with better textures using a shader for blending
+        // Create terrain material
+        // Load terrain texture
         const textureLoader = new THREE.TextureLoader();
-        const textureRepeat = 100; // Adjust repeat based on terrain size and texture size
+        const terrainTexture = textureLoader.load('/textures/concrete_diff.jpg', (texture) => {
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(100, 100); // Adjust repeat based on terrain size and desired tiling
+            texture.anisotropy = 16; // Improve texture quality at oblique angles
+        });
 
-        const grassTexture = textureLoader.load('/textures/grass.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-        const dirtTexture = textureLoader.load('/textures/dirt.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-        const rockTexture = textureLoader.load('/textures/rock.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-
-        // Load normal and roughness maps
-        const grassNormalMap = textureLoader.load('/textures/grass_normal.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-        const dirtNormalMap = textureLoader.load('/textures/dirt_normal.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-        const rockNormalMap = textureLoader.load('/textures/rock_normal.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-
-        const grassRoughnessMap = textureLoader.load('/textures/grass_roughness.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-        const dirtRoughnessMap = textureLoader.load('/textures/dirt_roughness.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-        const rockRoughnessMap = textureLoader.load('/textures/rock_roughness.jpg', (texture) => { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.repeat.set(textureRepeat, textureRepeat); });
-
-        const terrainShader = {
-            uniforms: {
-                grassTexture: { value: grassTexture },
-                dirtTexture: { value: dirtTexture },
-                rockTexture: { value: rockTexture },
-                grassNormalMap: { value: grassNormalMap },
-                dirtNormalMap: { value: dirtNormalMap },
-                rockNormalMap: { value: rockNormalMap },
-                grassRoughnessMap: { value: grassRoughnessMap },
-                dirtRoughnessMap: { value: dirtRoughnessMap },
-                rockRoughnessMap: { value: rockRoughnessMap },
-                // Define height ranges for blending (these will need tuning)
-                lowHeight: { value: 20 }, // Adjusted low height
-                midHeight: { value: 80 }, // Adjusted mid height
-                highHeight: { value: 200 }, // Adjusted high height
-                // Add light and material properties uniforms if needed
-
-                // Uniforms for lighting and camera (manually updated)
-                directionalLights: { value: new THREE.Vector3() }, // Add back and initialize
-                directionalLightColor: { value: new THREE.Color() }, // Add back and initialize
-                ambientLightColor: { value: new THREE.Color(0xffffff) }, // Add back and initialize
-                viewPosition: { value: new THREE.Vector3() }, // Add back and initialize
-
-                // Uniforms for fog (manually updated)
-                fogDensity: { value: 0.0002 }, // Add and initialize with default fog density
-                fogColor: { value: new THREE.Color(0x87CEEB) }, // Add and initialize with default fog color
-            },
-            vertexShader: `
-                varying vec2 vUv;
-                varying float vHeight;
-                attribute vec4 tangent; // Uncomment tangent attribute
-                varying vec3 vNormal;
-                varying vec3 vTangent;
-                varying vec3 vBitangent;
-
-                void main() {
-                    vUv = uv;
-                    vHeight = position.y;
-                    // Pass normal and tangent if needed for lighting
-                    vNormal = normal;
-                    vTangent = tangent.xyz;
-                    // Calculate bitangent
-                    vBitangent = cross(normal, tangent.xyz) * tangent.w;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform sampler2D grassTexture;
-                uniform sampler2D dirtTexture;
-                uniform sampler2D rockTexture;
-                uniform sampler2D grassNormalMap;
-                uniform sampler2D dirtNormalMap;
-                uniform sampler2D rockNormalMap;
-                uniform sampler2D grassRoughnessMap;
-                uniform sampler2D dirtRoughnessMap;
-                uniform sampler2D rockRoughnessMap;
-                uniform float lowHeight;
-                uniform float midHeight;
-                uniform float highHeight;
-
-                // Uniforms for lighting and camera (manually updated)
-                uniform vec3 directionalLights;
-                uniform vec3 directionalLightColor;
-                uniform vec3 ambientLightColor;
-
-                // Camera position (for view direction calculation)
-                uniform vec3 viewPosition;
-
-                // Uniforms for fog
-                uniform float fogDensity;
-                uniform vec3 fogColor;
-
-                varying vec2 vUv;
-                varying float vHeight;
-                varying vec3 vNormal;
-                varying vec3 vTangent;
-                varying vec3 vBitangent;
-
-                // PBR related uniforms (simplified, can be expanded)
-                // uniform vec3 albedo; // Albedo is provided by blended texture
-                // uniform float metalness; // Terrain is typically non-metallic
-                // uniform float roughness; // Roughness is provided by blended texture
-
-                void main() {
-                    // Sample base textures
-                    vec4 grassColor = texture2D(grassTexture, vUv);
-                    vec4 dirtColor = texture2D(dirtTexture, vUv);
-                    vec4 rockColor = texture2D(rockTexture, vUv);
-
-                    // Sample normal maps (values will be in tangent space if tangents are calculated in vertex shader)
-                    vec3 grassNormal = texture2D(grassNormalMap, vUv).rgb * 2.0 - 1.0;
-                    vec3 dirtNormal = texture2D(dirtNormalMap, vUv).rgb * 2.0 - 1.0;
-                    vec3 rockNormal = texture2D(rockNormalMap, vUv).rgb * 2.0 - 1.0;
-
-                    // Sample roughness maps
-                    float grassRoughness = texture2D(grassRoughnessMap, vUv).r;
-                    float dirtRoughness = texture2D(dirtRoughnessMap, vUv).r;
-                    float rockRoughness = texture2D(rockRoughnessMap, vUv).r;
-
-                    // Simple height-based blending
-                    float blend1 = smoothstep(lowHeight, midHeight, vHeight);
-                    float blend2 = smoothstep(midHeight, highHeight, vHeight);
-
-                    vec4 finalColor = mix(grassColor, dirtColor, blend1);
-                    finalColor = mix(finalColor, rockColor, blend2);
-
-                    // Blend normals and roughness based on the same blending factors
-                    vec3 blendedNormal = mix(mix(grassNormal, dirtNormal, blend1), rockNormal, blend2);
-                    // Transform blended normal from tangent space to world space
-                    mat3 tbn = mat3(normalize(vTangent), normalize(vBitangent), normalize(vNormal));
-                    vec3 worldNormal = normalize(tbn * blendedNormal);
-
-                    float blendedRoughness = mix(mix(grassRoughness, dirtRoughness, blend1), rockRoughness, blend2);
-
-                    // PBR Lighting Calculation (simplified)
-                    vec3 N = worldNormal; // World space normal
-                    vec3 V = normalize(viewPosition - gl_Position.xyz); // View direction
-                    vec3 L = normalize(directionalLights); // Light direction
-                    vec3 lightColor = directionalLightColor;
-
-                    // Ambient term
-                    vec3 ambient = ambientLightColor * finalColor.rgb;
-
-                    // Diffuse term (Lambertian)
-                    float NdotL = max(dot(N, L), 0.0);
-                    vec3 diffuse = lightColor * finalColor.rgb * NdotL;
-
-                    // Specular term (simplified GGX/Trowbridge-Reitz)
-                    vec3 H = normalize(L + V); // Halfway vector
-                    float NdotH = max(dot(N, H), 0.0);
-                    float NdotV = max(dot(N, V), 0.0);
-                    float HdotV = max(dot(H, V), 0.0);
-
-                    // Geometric obstruction (G) - Schlick-GGX
-                    float k = (blendedRoughness + 1.0) * (blendedRoughness + 1.0) / 8.0;
-                    float G_V = NdotV / (NdotV * (1.0 - k) + k);
-                    float G_L = NdotL / (NdotL * (1.0 - k) + k);
-                    float G = G_V * G_L;
-
-                    // Normal Distribution Function (D) - Trowbridge-Reitz GGX
-                    float NdotH2 = NdotH * NdotH;
-                    float alpha = blendedRoughness * blendedRoughness;
-                    float alpha2 = alpha * alpha;
-                    float denom = NdotH2 * (alpha2 - 1.0) + 1.0;
-                    float D = alpha2 / (PI * denom * denom);
-
-                    // Fresnel (F) - Schlick approximation
-                    vec3 F0 = vec3(0.04); // Reflectivity at normal incidence for non-metals
-                    vec3 F = F0 + (1.0 - F0) * pow(max(1.0 - HdotV, 0.0), 5.0);
-
-                    // Specular BRDF
-                    vec3 specular = (D * G * F) / max(4.0 * NdotL * NdotV, 0.001);
-
-                    // Combine ambient, diffuse, and specular
-                    vec3 finalLighting = ambient + diffuse + lightColor * specular;
-
-                    // Apply fog
-                    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * gl_FragCoord.z * gl_FragCoord.z );
-                    gl_FragColor = vec4(mix(finalLighting, fogColor, fogFactor), finalColor.a);
-                }
-
-                // Define PI for shader
-                #ifndef PI
-                #define PI 3.14159265359
-                #endif
-            `,
-        };
-
-        const material = new THREE.ShaderMaterial({
-            uniforms: terrainShader.uniforms,
-            vertexShader: terrainShader.vertexShader,
-            fragmentShader: terrainShader.fragmentShader,
-            // Add lights, fog, and shadow support to the shader if needed
-            // lights: true, // Disable automatic lighting uniform injection
-            fog: false,   // Disable automatic fog uniform injection for this material
-            // vertexTangents: true // Required if using tangent attribute in vertex shader
+        const material = new THREE.MeshStandardMaterial({
+            map: terrainTexture,
+            color: 0x8fbc8f, // Base color that blends with the texture
+            flatShading: true,
+            roughness: 0.8, // Add some basic material properties
+            metalness: 0.1
         });
 
         this.terrain = new THREE.Mesh(geometry, material);
         this.terrain.receiveShadow = true;
-        // Enable casting shadows if the material supports it (requires shader modifications)
-        // this.terrain.castShadow = true;
         this.scene.add(this.terrain);
-
-        // Add trees and rocks
-        this.addEnvironmentDetails();
 
         // Create physics body for terrain
         const shape = new CANNON.Heightfield(
             this.generateHeightfieldData(size, resolution, heightScale),
             { elementSize: size / resolution }
         );
-        
+
         const terrainBody = new CANNON.Body({
             mass: 0,
             shape: shape,
             material: terrainMaterial
         });
-        
         terrainBody.position.set(-size / 2, -heightScale / 2, -size / 2);
         this.world.addBody(terrainBody);
-    }
-
-    addEnvironmentDetails() {
-        // Add trees (scattered)
-        const treeCount = 500; // Reduce scattered trees slightly to focus on roadside
-        const treeGeometry = new THREE.ConeGeometry(2, 5, 8);
-        const treeMaterial = new THREE.MeshStandardMaterial({ color: 0x2d5a27 });
-        const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
-        const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x4d2926 });
-
-        for (let i = 0; i < treeCount; i++) {
-            const x = (Math.random() - 0.5) * 10000;
-            const z = (Math.random() - 0.5) * 10000;
-            const y = this.getTerrainHeightAt(x, z);
-
-            // Avoid placing scattered trees too close to the road
-            const distanceToRoad = this.getDistanceToRoad(x, z);
-            if (distanceToRoad < 80) continue; // Increased threshold to keep scattered trees further away
-
-            // Create tree group
-            const tree = new THREE.Group();
-
-            // Add trunk
-            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-            trunk.position.y = 1;
-            trunk.castShadow = true;
-            tree.add(trunk);
-
-            // Add foliage
-            const foliage = new THREE.Mesh(treeGeometry, treeMaterial);
-            foliage.position.y = 4;
-            foliage.castShadow = true;
-            tree.add(foliage);
-
-            // Position tree
-            tree.position.set(x, y, z);
-            this.scene.add(tree);
-        }
-
-        // Add rocks (scattered)
-        const rockCount = 200; // Reduce scattered rocks slightly
-        const rockGeometry = new THREE.DodecahedronGeometry(1, 0);
-        const rockMaterial = new THREE.MeshStandardMaterial({
-            color: 0x808080,
-            roughness: 0.9,
-            metalness: 0.1
-        });
-
-        for (let i = 0; i < rockCount; i++) {
-            const x = (Math.random() - 0.5) * 10000;
-            const z = (Math.random() - 0.5) * 10000;
-            const y = this.getTerrainHeightAt(x, z);
-
-            // Avoid placing scattered rocks too close to the road
-            const distanceToRoad = this.getDistanceToRoad(x, z);
-            if (distanceToRoad < 40) continue; // Increased threshold
-
-            const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-            rock.position.set(x, y, z);
-            rock.rotation.set(
-                Math.random() * Math.PI,
-                Math.random() * Math.PI,
-                Math.random() * Math.PI
-            );
-            rock.scale.set(
-                0.5 + Math.random() * 1.5, // Smaller scattered rocks
-                0.5 + Math.random() * 1.5,
-                0.5 + Math.random() * 1.5
-            );
-            rock.castShadow = true;
-            rock.receiveShadow = true;
-            this.scene.add(rock);
-        }
-
-        // Add dense vegetation along the road (bushes)
-        const roadsideVegetationCount = 10000; // Further increased vegetation density
-        const bushGeometry = new THREE.SphereGeometry(1.5, 8, 8); // Simple bush geometry
-        const bushMaterial = new THREE.MeshStandardMaterial({ color: 0x4a7c40 }); // Bush color
-
-        // Consider using instancing for roadside vegetation for performance
-        const bushMesh = new THREE.InstancedMesh(bushGeometry, bushMaterial, roadsideVegetationCount);
-        const dummyBush = new THREE.Object3D();
-
-        if (this.roadPoints && this.roadPoints.length > 1) {
-             for (let i = 0; i < roadsideVegetationCount; i++) {
-                // Pick a random point along the road segment
-                const roadPointIndex = Math.floor(Math.random() * (this.roadPoints.length - 1));
-                const p1 = this.roadPoints[roadPointIndex];
-                const p2 = this.roadPoints[roadPointIndex + 1];
-
-                 const t = Math.random(); // Position along the segment
-                 const position = new THREE.Vector3().copy(p1).lerp(p2, t);
-
-                const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
-                const upVector = new THREE.Vector3(0, 1, 0);
-                const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
-
-                // Position the vegetation near the road barrier on both sides
-                const side = Math.random() > 0.5 ? 1 : -1; // Randomly choose left or right side
-                const offsetX = Math.random() * 4; // Distance away from the barrier (increased)
-                const offsetZ = (Math.random() - 0.5) * 1.5; // Small random offset along road
-
-                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + 0.5 + offsetX));
-                position.add(segmentDirection.clone().multiplyScalar(offsetZ));
-
-                 const height = this.getTerrainHeightAt(position.x, position.z);
-                 position.y = height + bushGeometry.parameters.radius * 0.3 + Math.random() * 0.3; // Place on terrain with slight offset and more randomness
-
-                // Add some randomness to scale and rotation
-                const scale = 0.5 + Math.random() * 1.0; // Varied scale (adjusted range)
-                dummyBush.position.copy(position);
-                dummyBush.scale.set(scale, scale, scale);
-                dummyBush.rotation.set(0, Math.random() * Math.PI * 2, 0);
-                dummyBush.updateMatrix();
-                bushMesh.setMatrixAt(i, dummyBush.matrix);
-             }
-             bushMesh.instanceMatrix.needsUpdate = true;
-             bushMesh.castShadow = true;
-             bushMesh.receiveShadow = true;
-             this.scene.add(bushMesh);
-        } else {
-             console.warn('Road points not available for roadside vegetation placement.');
-        }
-
-        // Add dense grass along the road edges using instancing
-        const grassBladeCount = 40000; // Further increased grass density
-        // Simple grass blade geometry (can be improved)
-        const grassGeometry = new THREE.PlaneGeometry(0.5, 1);
-        grassGeometry.translate(0, 0.5, 0); // Pivot at the bottom
-
-        const grassMaterial = new THREE.MeshStandardMaterial({
-            color: 0x55aa55, // Green color
-            side: THREE.DoubleSide,
-            transparent: true,
-            alphaTest: 0.1 // Discard pixels below this alpha
-        });
-        // Note: For more realistic grass, you'd use a texture with alpha and potentially a shader.
-
-        const grassMesh = new THREE.InstancedMesh(grassGeometry, grassMaterial, grassBladeCount);
-        const dummyGrass = new THREE.Object3D();
-
-         if (this.roadPoints && this.roadPoints.length > 1) {
-             for (let i = 0; i < grassBladeCount; i++) {
-                 // Pick a random point along the road segment
-                const roadPointIndex = Math.floor(Math.random() * (this.roadPoints.length - 1));
-                const p1 = this.roadPoints[roadPointIndex];
-                const p2 = this.roadPoints[roadPointIndex + 1];
-
-                 const t = Math.random(); // Position along the segment
-                 const position = new THREE.Vector3().copy(p1).lerp(p2, t);
-
-                const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
-                const upVector = new THREE.Vector3(0, 1, 0);
-                const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
-
-                // Position the grass right at the road edge/barrier
-                const side = Math.random() > 0.5 ? 1 : -1; // Randomly choose left or right side
-                const offsetX = Math.random() * 1.2; // Distance away from the road edge (increased)
-                const offsetZ = (Math.random() - 0.5) * 0.3; // Small random offset along road
-
-                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + Math.random() * 1.0)); // Position right at the edge with increased random offset
-                position.add(segmentDirection.clone().multiplyScalar(offsetZ));
-
-                 const height = this.getTerrainHeightAt(position.x, position.z);
-                 position.y = height; // Place directly on terrain surface
-
-                 // Add some randomness to scale and rotation
-                const scale = 0.3 + Math.random() * 0.5; // Varied scale for grass blades (adjusted range)
-                dummyGrass.position.copy(position);
-                dummyGrass.scale.set(scale, scale, scale);
-
-                 // Align roughly upright with random rotation around Y and slight tilt
-                 dummyGrass.rotation.set(-Math.PI / 2 + (Math.random() - 0.5) * 0.6, Math.random() * Math.PI * 2, 0); // Tilt slightly and random Y rotation
-
-                dummyGrass.updateMatrix();
-                grassMesh.setMatrixAt(i, dummyGrass.matrix);
-             }
-             grassMesh.instanceMatrix.needsUpdate = true;
-             grassMesh.castShadow = true;
-             grassMesh.receiveShadow = true;
-             this.scene.add(grassMesh);
-        } else {
-             console.warn('Road points not available for grass placement.');
-        }
-
-        // Add dense small plants/ground cover along the road edges using instancing
-        const groundCoverCount = 60000; // Very high density for ground cover
-        const groundCoverGeometry = new THREE.PlaneGeometry(0.3, 0.3); // Smaller geometry
-        groundCoverGeometry.translate(0, 0.15, 0); // Pivot at the bottom
-
-        const groundCoverMaterial = new THREE.MeshStandardMaterial({
-            color: 0x7a9a51, // Different shade of green
-            side: THREE.DoubleSide,
-            transparent: true,
-            alphaTest: 0.1
-        });
-
-        const groundCoverMesh = new THREE.InstancedMesh(groundCoverGeometry, groundCoverMaterial, groundCoverCount);
-        const dummyGroundCover = new THREE.Object3D();
-
-         if (this.roadPoints && this.roadPoints.length > 1) {
-             for (let i = 0; i < groundCoverCount; i++) {
-                 // Pick a random point along the road segment
-                const roadPointIndex = Math.floor(Math.random() * (this.roadPoints.length - 1));
-                const p1 = this.roadPoints[roadPointIndex];
-                const p2 = this.roadPoints[roadPointIndex + 1];
-
-                 const t = Math.random(); // Position along the segment
-                 const position = new THREE.Vector3().copy(p1).lerp(p2, t);
-
-                const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
-                const upVector = new THREE.Vector3(0, 1, 0);
-                const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
-
-                // Position the ground cover very close to the road edge/barrier
-                const side = Math.random() > 0.5 ? 1 : -1; // Randomly choose left or right side
-                const offsetX = Math.random() * 0.5; // Very small distance away from the road edge
-                const offsetZ = (Math.random() - 0.5) * 0.1; // Very small random offset along road
-
-                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + offsetX));
-                position.add(segmentDirection.clone().multiplyScalar(offsetZ));
-
-                 const height = this.getTerrainHeightAt(position.x, position.z);
-                 position.y = height; // Place directly on terrain surface
-
-                 // Add some randomness to scale and rotation
-                const scale = 0.2 + Math.random() * 0.3; // Very small scale
-                dummyGroundCover.position.copy(position);
-                dummyGroundCover.scale.set(scale, scale, scale);
-
-                 // Align roughly upright with random rotation around Y
-                 dummyGroundCover.rotation.set(-Math.PI / 2 + (Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, 0); // Slight tilt and random Y rotation
-
-                dummyGroundCover.updateMatrix();
-                groundCoverMesh.setMatrixAt(i, dummyGroundCover.matrix);
-             }
-             groundCoverMesh.instanceMatrix.needsUpdate = true;
-             groundCoverMesh.castShadow = true;
-             groundCoverMesh.receiveShadow = true;
-             this.scene.add(groundCoverMesh);
-        } else {
-             console.warn('Road points not available for ground cover placement.');
-        }
-    }
-
-    getTerrainHeightAt(x, z) {
-        // Sample the height at the given x,z coordinates
-        const size = 20000;
-        const heightScale = 500;
-        
-        let height = 0;
-        height += this.noise(x * 0.0001, z * 0.0001) * heightScale;
-        height += this.noise(x * 0.0002, z * 0.0002) * heightScale * 0.5;
-        height += this.noise(x * 0.0004, z * 0.0004) * heightScale * 0.25;
-        height += this.noise(x * 0.0008, z * 0.0008) * heightScale * 0.125;
-        
-        return height;
-    }
-
-    getDistanceToRoad(x, z) {
-        if (!this.roadPoints || this.roadPoints.length < 2) {
-            return Infinity; // Return infinity if no road points are available
-        }
-
-        let minDistance = Infinity;
-        const point = new THREE.Vector3(x, 0, z); // Ignore Y for distance calculation to road on the XZ plane
-
-        for (let i = 0; i < this.roadPoints.length - 1; i++) {
-            const p1 = new THREE.Vector3(this.roadPoints[i].x, 0, this.roadPoints[i].z);
-            const p2 = new THREE.Vector3(this.roadPoints[i + 1].x, 0, this.roadPoints[i + 1].z);
-
-            // Calculate distance to line segment (simplified)
-            const l2 = p1.distanceToSquared(p2);
-            if (l2 === 0) {
-                minDistance = Math.min(minDistance, point.distanceTo(p1));
-            } else {
-                let t = ((point.x - p1.x) * (p2.x - p1.x) + (point.z - p1.z) * (p2.z - p1.z)) / l2;
-                t = Math.max(0, Math.min(1, t));
-                const projection = new THREE.Vector3(
-                    p1.x + t * (p2.x - p1.x),
-                    0,
-                    p1.z + t * (p2.z - p1.z)
-                );
-                minDistance = Math.min(minDistance, point.distanceTo(projection));
-            }
-        }
-        return minDistance;
     }
 
     generateHeightfieldData(size, resolution, heightScale) {
@@ -696,18 +159,7 @@ class Game {
             for (let j = 0; j < resolution; j++) {
                 const x = (i / resolution - 0.5) * size;
                 const z = (j / resolution - 0.5) * size;
-                
-                let height = 0;
-                // Base terrain - match visual noise scale
-                height += this.noise(x * 0.0001, z * 0.0001) * heightScale;
-                // Medium detail - match visual noise scale
-                height += this.noise(x * 0.0002, z * 0.0002) * heightScale * 0.5;
-                // Fine detail - match visual noise scale
-                height += this.noise(x * 0.0004, z * 0.0004) * heightScale * 0.25;
-                // Very fine detail - add visual noise scale for consistency
-                height += this.noise(x * 0.0008, z * 0.0008) * heightScale * 0.125;
-                
-                data[i][j] = height;
+                data[i][j] = this.noise(x * 0.01, z * 0.01) * heightScale;
             }
         }
         return data;
@@ -718,166 +170,33 @@ class Game {
         const textureLoader = new THREE.TextureLoader();
         const roadTexture = textureLoader.load('/textures/road.jpg', (texture) => {
             texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(1, 1000);
-            texture.anisotropy = 16; // Improve texture quality
+            texture.repeat.set(1, 10);
+            texture.anisotropy = 16;
         });
 
-        // Create road material with better properties
+        // Load road normal map
+        const roadNormalMap = textureLoader.load('/textures/concrete_nor.jpg', (texture) => {
+            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(1, 10); // Match repeat with the base texture
+            texture.anisotropy = 16;
+        });
+
+        // Create road material
         const roadMaterial = new THREE.MeshStandardMaterial({
             map: roadTexture,
+            normalMap: roadNormalMap,
             roughness: 0.8,
             metalness: 0.2,
-            normalScale: new THREE.Vector2(1, 1)
+            normalScale: new THREE.Vector2(1, 1) // Adjust normal map intensity
         });
 
         // Create road generator with physics world
         this.roadGenerator = new RoadGenerator(this.scene, this.world, roadMaterial);
-        
+
         // Get the road points that were generated by the RoadGenerator
         this.roadPoints = this.roadGenerator.getRoadPoints();
-        
-        // Wait for the road mesh to be created before adding markings
-        setTimeout(() => {
-            if (this.roadGenerator.roadMesh) {
-                // Add road markings
-                this.addRoadMarkings(this.roadGenerator.roadMesh.geometry);
 
-                // Add road barrier
-                this.addRoadBarrier();
-            }
-        }, 0);
-
-        console.log('Road created with improved properties.');
-    }
-
-    addRoadMarkings(roadGeometry) {
-        // Create center line material
-        const centerLineMaterial = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            roughness: 0.5,
-            metalness: 0.1
-        });
-
-        // Create edge line material
-        const edgeLineMaterial = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            roughness: 0.5,
-            metalness: 0.1
-        });
-
-        // Add center line
-        const centerLineGeometry = new THREE.BufferGeometry();
-        const centerLinePositions = [];
-        const centerLineIndices = [];
-
-        // Generate center line vertices and indices
-        const vertices = roadGeometry.attributes.position.array;
-        for (let i = 0; i < vertices.length; i += 9) {
-            const x = vertices[i];
-            const y = vertices[i + 1] + 0.01; // Slightly above road
-            const z = vertices[i + 2];
-            
-            centerLinePositions.push(x, y, z);
-            if (i > 0) {
-                centerLineIndices.push(i/3 - 1, i/3);
-            }
-        }
-
-        centerLineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(centerLinePositions, 3));
-        centerLineGeometry.setIndex(centerLineIndices);
-
-        const centerLine = new THREE.LineSegments(centerLineGeometry, centerLineMaterial);
-        this.scene.add(centerLine);
-
-        // Add edge lines (similar process for left and right edges)
-        // ... (implement edge lines if needed)
-    }
-
-    addRoadBarrier() {
-        if (!this.roadPoints || this.roadPoints.length < 2) {
-            console.error('Road points not available for barrier generation.');
-            return;
-        }
-
-        const barrierMaterial = new THREE.MeshStandardMaterial({
-            color: 0x808080, // Gray concrete color
-            roughness: 0.6,
-            metalness: 0.1
-        });
-
-        const barrierWidth = 0.5;
-        const barrierHeight = 1.0;
-
-        const barrierGeometry = new THREE.BufferGeometry();
-        const positions = [];
-        const normals = [];
-        const uvs = [];
-        const indices = [];
-        let index = 0;
-
-        for (let i = 0; i < this.roadPoints.length - 1; i++) {
-            const p1 = this.roadPoints[i];
-            const p2 = this.roadPoints[i + 1];
-
-            // Get the direction of the road segment
-            const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
-            const upVector = new THREE.Vector3(0, 1, 0);
-
-            // Calculate the perpendicular vector (pointing away from the road center)
-            const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
-
-            // Define barrier vertices for this segment
-            const v1 = new THREE.Vector3().copy(p1).add(perpendicular.clone().multiplyScalar(RoadGenerator.roadWidth / 2));
-            const v2 = new THREE.Vector3().copy(p2).add(perpendicular.clone().multiplyScalar(RoadGenerator.roadWidth / 2));
-            const v3 = new THREE.Vector3().copy(v1).add(upVector.clone().multiplyScalar(barrierHeight));
-            const v4 = new THREE.Vector3().copy(v2).add(upVector.clone().multiplyScalar(barrierHeight));
-
-            // Vertices for the side facing away from the road
-            const v5 = new THREE.Vector3().copy(v1).add(perpendicular.clone().multiplyScalar(barrierWidth));
-            const v6 = new THREE.Vector3().copy(v2).add(perpendicular.clone().multiplyScalar(barrierWidth));
-            const v7 = new THREE.Vector3().copy(v3).add(perpendicular.clone().multiplyScalar(barrierWidth));
-            const v8 = new THREE.Vector3().copy(v4).add(perpendicular.clone().multiplyScalar(barrierWidth));
-            
-            // Push positions for both sides and top
-            positions.push(v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, v4.x, v4.y, v4.z, v3.x, v3.y, v3.z); // Side facing road
-            positions.push(v5.x, v5.y, v5.z, v6.x, v6.y, v6.z, v8.x, v8.y, v8.z, v7.x, v7.y, v7.z); // Side facing away
-            positions.push(v3.x, v3.y, v3.z, v4.x, v4.y, v4.z, v8.x, v8.y, v8.z, v7.x, v7.y, v7.z); // Top face
-
-            // Calculate and push normals (simplified - should be per vertex for smooth shading)
-            const sideNormal = perpendicular.clone().negate(); // Normal for side facing road
-            const outerSideNormal = perpendicular.clone(); // Normal for side facing away
-            const topNormal = upVector.clone(); // Normal for top face
-
-            for(let j = 0; j < 4; j++) normals.push(sideNormal.x, sideNormal.y, sideNormal.z);
-            for(let j = 0; j < 4; j++) normals.push(outerSideNormal.x, outerSideNormal.y, outerSideNormal.z);
-            for(let j = 0; j < 4; j++) normals.push(topNormal.x, topNormal.y, topNormal.z);
-
-            // Push UVs (simplified)
-            uvs.push(0, 0, 1, 0, 1, 1, 0, 1); // Side facing road
-            uvs.push(0, 0, 1, 0, 1, 1, 0, 1); // Side facing away
-            uvs.push(0, 0, 1, 0, 1, 1, 0, 1); // Top face
-
-            // Push indices
-            indices.push(index, index + 1, index + 2, index, index + 2, index + 3); // Side facing road
-            indices.push(index + 4, index + 5, index + 6, index + 4, index + 6, index + 7); // Side facing away
-            indices.push(index + 8, index + 9, index + 10, index + 8, index + 10, index + 11); // Top face
-
-            index += 12;
-        }
-
-        barrierGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        barrierGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-        barrierGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        barrierGeometry.setIndex(indices);
-        
-        barrierGeometry.computeBoundingSphere();
-
-        const barrierMesh = new THREE.Mesh(barrierGeometry, barrierMaterial);
-        barrierMesh.castShadow = true;
-        barrierMesh.receiveShadow = true;
-        this.scene.add(barrierMesh);
-
-        console.log('Road barrier added.');
+        console.log('Road created.');
     }
 
     createCar(carBodyMaterial, wheelMaterial) {
@@ -899,330 +218,80 @@ class Game {
         // Create the car at the starting road point with the calculated rotation
         const carPosition = new CANNON.Vec3(
             startPoint.x,
-            startPoint.y + 1.0,
+            startPoint.y + 0.5, // Lift slightly above the ground
             startPoint.z
         );
 
-        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, carPosition, quaternion);
-        console.log('Car created at road start with position:', carPosition);
-    }
-
-    createWheels() {
-        const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 32);
-        const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
-        this.wheels = [];
-
-        const wheelPositions = [
-            [-1, -0.5, 1],  // Front left
-            [1, -0.5, 1],   // Front right
-            [-1, -0.5, -1], // Rear left
-            [1, -0.5, -1]   // Rear right
-        ];
-
-        wheelPositions.forEach(pos => {
-            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            wheel.position.set(...pos);
-            wheel.rotation.z = Math.PI / 2;
-            this.car.add(wheel);
-            this.wheels.push(wheel);
+        // Create car physics body with improved properties
+        this.chassisBody = new CANNON.Body({
+            mass: 1500,
+            position: carPosition,
+            shape: new CANNON.Box(new CANNON.Vec3(1, 0.5, 2)),
+            material: carBodyMaterial,
+            linearDamping: 0.5,
+            angularDamping: 0.5
         });
+        this.chassisBody.quaternion.copy(quaternion);
+        this.world.addBody(this.chassisBody);
+
+        // Create RaycastVehicle with improved settings
+        this.vehicle = new CANNON.RaycastVehicle({
+            chassisBody: this.chassisBody,
+            indexRightAxis: 0,
+            indexUpAxis: 1,
+            indexForwardAxis: 2
+        });
+
+        // Add wheels with improved physics properties
+        const wheelOptions = {
+            radius: 0.4,
+            directionLocal: new CANNON.Vec3(0, -1, 0),
+            suspensionStiffness: 30, // Adjusted stiffness
+            suspensionRestLength: 0.3, // Adjusted rest length
+            frictionSlip: 1.5, // Adjusted friction
+            dampingRelaxation: 2.3, // Adjusted damping
+            dampingCompression: 4.4, // Adjusted damping
+            maxSuspensionForce: 100000,
+            rollInfluence: 0.01,
+            axleLocal: new CANNON.Vec3(-1, 0, 0),
+            chassisConnectionPointLocal: new CANNON.Vec3(),
+            maxSuspensionTravel: 0.3,
+            customSlidingRotationalSpeed: -30,
+            useCustomSlidingRotationalSpeed: true
+        };
+
+        const axleWidth = 1.5; // Adjusted axle width
+        const wheelBase = 2.5; // Adjusted wheel base
+
+        // Add wheels with proper positioning
+        this.vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: new CANNON.Vec3(-axleWidth / 2, -0.3, wheelBase) }); // Front left
+        this.vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: new CANNON.Vec3(axleWidth / 2, -0.3, wheelBase) }); // Front right
+        this.vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: new CANNON.Vec3(-axleWidth / 2, -0.3, -wheelBase) }); // Rear left
+        this.vehicle.addWheel({ ...wheelOptions, chassisConnectionPointLocal: new CANNON.Vec3(axleWidth / 2, -0.3, -wheelBase) }); // Rear right
+
+        this.vehicle.addToWorld(this.world);
+
+        // Create the car with improved physics
+        this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, carPosition, quaternion);
+
+        // Add the car's visual mesh to the scene
+        this.scene.add(this.car.body);
+        // Set initial position of the visual mesh to match the physics body
+        this.car.body.position.copy(carPosition);
+
+        console.log('Car created.');
     }
 
     createLights() {
-        // Ambient light with warmer color
-        this.ambientLight = new THREE.AmbientLight(0xffffeb, 0.3);
-        this.scene.add(this.ambientLight);
+        // Add ambient light
+        const ambientLight = new THREE.AmbientLight(0x808080, 0.8);
+        this.scene.add(ambientLight);
 
-        // Main directional light (sun)
-        this.directionalLight = new THREE.DirectionalLight(0xffffeb, 1.2);
-        this.directionalLight.position.set(100, 200, 100);
-        this.directionalLight.castShadow = true;
-
-        // Improve shadow quality
-        this.directionalLight.shadow.mapSize.width = 4096;
-        this.directionalLight.shadow.mapSize.height = 4096;
-        this.directionalLight.shadow.camera.near = 0.5;
-        this.directionalLight.shadow.camera.far = 1000;
-        this.directionalLight.shadow.camera.left = -200;
-        this.directionalLight.shadow.camera.right = 200;
-        this.directionalLight.shadow.camera.top = 200;
-        this.directionalLight.shadow.camera.bottom = -200;
-        this.directionalLight.shadow.bias = -0.0001;
-        this.directionalLight.shadow.normalBias = 0.02;
-        this.directionalLight.shadow.radius = 1.5;
-
-        this.scene.add(this.directionalLight);
-
-        // Add hemisphere light for better ambient lighting
-        const hemisphereLight = new THREE.HemisphereLight(0xffffeb, 0x080820, 0.5);
-        this.scene.add(hemisphereLight);
-    }
-
-    createWater() {
-        const waterGeometry = new THREE.PlaneGeometry(10000, 10000);
-        this.water = new Water(
-            waterGeometry,
-            {
-                textureWidth: 512,
-                textureHeight: 512,
-                waterNormals: new THREE.TextureLoader().load('textures/waternormals.jpg', function (texture) {
-                    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-                }),
-                sunDirection: new THREE.Vector3(),
-                sunColor: 0xffffff,
-                waterColor: 0x001e0f,
-                distortionScale: 3.7,
-                fog: this.scene.fog !== undefined
-            }
-        );
-        this.water.rotation.x = -Math.PI / 2;
-        this.water.position.y = -100;
-        this.scene.add(this.water);
-    }
-
-    createAtmosphere() {
-        // Create a more realistic fog
-        this.scene.fog = new THREE.FogExp2(0x87CEEB, 0.0002);
-
-        // Add sky gradient
-        const skyGeometry = new THREE.SphereGeometry(10000, 32, 32);
-        const skyMaterial = new THREE.ShaderMaterial({
-            uniforms: {
-                topColor: { value: new THREE.Color(0x0077ff) },
-                bottomColor: { value: new THREE.Color(0xffffff) },
-                offset: { value: 33 },
-                exponent: { value: 0.6 }
-            },
-            vertexShader: `
-                varying vec3 vWorldPosition;
-                void main() {
-                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                    vWorldPosition = worldPosition.xyz;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform vec3 topColor;
-                uniform vec3 bottomColor;
-                uniform float offset;
-                uniform float exponent;
-                varying vec3 vWorldPosition;
-                void main() {
-                    float h = normalize(vWorldPosition + offset).y;
-                    gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
-                }
-            `,
-            side: THREE.BackSide
-        });
-
-        const sky = new THREE.Mesh(skyGeometry, skyMaterial);
-        this.scene.add(sky);
-
-        // Add subtle atmospheric particles
-        const particleCount = 2000;
-        const particles = new THREE.BufferGeometry();
-        const positions = new Float32Array(particleCount * 3);
-        const colors = new Float32Array(particleCount * 3);
-
-        for (let i = 0; i < particleCount * 3; i += 3) {
-            // Position particles in a sphere around the scene
-            const radius = 5000 + Math.random() * 5000;
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.random() * Math.PI;
-            
-            positions[i] = radius * Math.sin(phi) * Math.cos(theta);
-            positions[i + 1] = radius * Math.sin(phi) * Math.sin(theta);
-            positions[i + 2] = radius * Math.cos(phi);
-
-            // Add subtle color variation
-            colors[i] = 0.9 + Math.random() * 0.1;
-            colors[i + 1] = 0.9 + Math.random() * 0.1;
-            colors[i + 2] = 1.0;
-        }
-
-        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        particles.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-        const particleMaterial = new THREE.PointsMaterial({
-            size: 2,
-            vertexColors: true,
-            transparent: true,
-            opacity: 0.3,
-            blending: THREE.AdditiveBlending
-        });
-
-        this.atmosphericParticles = new THREE.Points(particles, particleMaterial);
-        this.scene.add(this.atmosphericParticles);
-    }
-
-    updateWeather(deltaTime) {
-        // Update weather effects
-        switch (this.weather) {
-            case 'rainy':
-                // Add rain particles
-                if (!this.rainParticles) {
-                    this.createRainParticles();
-                }
-                this.updateRainParticles(deltaTime);
-                break;
-            case 'snowy':
-                // Add snow particles
-                if (!this.snowParticles) {
-                    this.createSnowParticles();
-                }
-                this.updateSnowParticles(deltaTime);
-                break;
-            case 'foggy':
-                // Increase fog density
-                this.scene.fog.density = 0.05;
-                break;
-            default:
-                // Clear weather
-                this.scene.fog.density = 0.005;
-                if (this.rainParticles) {
-                    this.scene.remove(this.rainParticles);
-                    this.rainParticles = null;
-                }
-                if (this.snowParticles) {
-                    this.scene.remove(this.snowParticles);
-                    this.snowParticles = null;
-                }
-                break;
-        }
-    }
-
-    createRainParticles() {
-        const particleCount = 1000;
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(particleCount * 3);
-        
-        for (let i = 0; i < particleCount; i++) {
-            positions[i * 3] = (Math.random() - 0.5) * 100;
-            positions[i * 3 + 1] = Math.random() * 50;
-            positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
-        }
-        
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        
-        const material = new THREE.PointsMaterial({
-            color: 0xaaaaaa,
-            size: 0.1,
-            transparent: true,
-            opacity: 0.6
-        });
-        
-        this.rainParticles = new THREE.Points(geometry, material);
-        this.scene.add(this.rainParticles);
-    }
-
-    updateRainParticles(deltaTime) {
-        const positions = this.rainParticles.geometry.attributes.position.array;
-        
-        for (let i = 0; i < positions.length; i += 3) {
-            positions[i + 1] -= 50 * deltaTime;
-            
-            if (positions[i + 1] < 0) {
-                positions[i] = (Math.random() - 0.5) * 100;
-                positions[i + 1] = 50;
-                positions[i + 2] = (Math.random() - 0.5) * 100;
-            }
-        }
-        
-        this.rainParticles.geometry.attributes.position.needsUpdate = true;
-    }
-
-    createSnowParticles() {
-        const particleCount = 1000;
-        const geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(particleCount * 3);
-        
-        for (let i = 0; i < particleCount; i++) {
-            positions[i * 3] = (Math.random() - 0.5) * 100;
-            positions[i * 3 + 1] = Math.random() * 50;
-            positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
-        }
-        
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        
-        const material = new THREE.PointsMaterial({
-            color: 0xffffff,
-            size: 0.2,
-            transparent: true,
-            opacity: 0.8
-        });
-        
-        this.snowParticles = new THREE.Points(geometry, material);
-        this.scene.add(this.snowParticles);
-    }
-
-    updateSnowParticles(deltaTime) {
-        const positions = this.snowParticles.geometry.attributes.position.array;
-        
-        for (let i = 0; i < positions.length; i += 3) {
-            positions[i] += Math.sin(Date.now() * 0.001 + i) * 0.1;
-            positions[i + 1] -= 5 * deltaTime;
-            positions[i + 2] += Math.cos(Date.now() * 0.001 + i) * 0.1;
-            
-            if (positions[i + 1] < 0) {
-                positions[i] = (Math.random() - 0.5) * 100;
-                positions[i + 1] = 50;
-                positions[i + 2] = (Math.random() - 0.5) * 100;
-            }
-        }
-        
-        this.snowParticles.geometry.attributes.position.needsUpdate = true;
-    }
-
-    updateTimeOfDay(deltaTime) {
-        // Update time of day (24-hour cycle)
-        this.timeOfDay = (this.timeOfDay + deltaTime * 0.1) % 24;
-        
-        // Calculate sun position (still useful for light direction)
-        const sunAngle = (this.timeOfDay / 24) * Math.PI * 2;
-        const sunHeight = Math.sin(sunAngle);
-        const sunDistance = Math.cos(sunAngle);
-        
-        // Update sun position for directional light
-        const sun = new THREE.Vector3(
-            Math.cos(sunAngle) * 1000,
-            sunHeight * 1000,
-            Math.sin(sunAngle) * 1000
-        );
-
-        if (this.directionalLight) {
-            this.directionalLight.position.copy(sun);
-        }
-        
-        // Update skybox uniform if needed (our current skybox shader doesn't need this)
-        // if (this.skybox && this.skybox.material && this.skybox.material.uniforms && this.skybox.material.uniforms.sunPosition) {
-        //     this.skybox.material.uniforms.sunPosition.value.copy(sun);
-        // }
-        
-        // Update lighting based on time of day
-        const dayIntensity = Math.max(0, Math.min(1, (sunHeight + 0.2) / 0.4));
-        if (this.ambientLight) {
-             this.ambientLight.intensity = 0.3 * dayIntensity; // Adjusted base intensity to match new ambient light
-        }
-        if (this.directionalLight) {
-             this.directionalLight.intensity = 1.2 * dayIntensity; // Adjusted base intensity to match new directional light
-        }
-        
-        // Update fog based on time of day
-        if (this.scene.fog) {
-             if (this.timeOfDay > 19 || this.timeOfDay < 5) {
-                 // Night time - darker fog
-                 this.scene.fog.density = 0.02;
-             } else if (this.timeOfDay > 6 && this.timeOfDay < 8) {
-                 // Dawn - light fog
-                 this.scene.fog.density = 0.01;
-             } else if (this.timeOfDay > 17 && this.timeOfDay < 19) {
-                 // Dusk - light fog
-                 this.scene.fog.density = 0.01;
-             } else {
-                 // Day time - clear
-                 this.scene.fog.density = 0.0002; // Adjusted to match base fog density
-             }
-        }
+        // Add directional light (simulating sun)
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        directionalLight.position.set(1, 1, 1).normalize();
+        directionalLight.castShadow = true;
+        this.scene.add(directionalLight);
     }
 
     setupControls() {
@@ -1233,7 +302,6 @@ class Game {
             left: false,
             right: false,
             brake: false,
-            handbrake: false,
             camera: false
         };
 
@@ -1251,11 +319,8 @@ class Game {
                 case 'd':
                     this.keys.right = true;
                     break;
-                case ' ':
+                case ' ': // Spacebar for brake
                     this.keys.brake = true;
-                    break;
-                case 'shift':
-                    this.keys.handbrake = true;
                     break;
                 case 'c':
                     this.changeCamera();
@@ -1277,11 +342,8 @@ class Game {
                 case 'd':
                     this.keys.right = false;
                     break;
-                case ' ':
+                case ' ': // Spacebar for brake
                     this.keys.brake = false;
-                    break;
-                case 'shift':
-                    this.keys.handbrake = false;
                     break;
             }
         });
@@ -1323,41 +385,27 @@ class Game {
     }
 
     updateCamera() {
-        // Ensure car object and its visual body are initialized and have a valid quaternion
-        if (!this.car || !this.car.body || !this.car.body.position || !this.car.body.quaternion || typeof this.car.body.quaternion.x === 'undefined') {
-            console.warn('Car object or its visual body/quaternion not ready for camera update.');
-            return; // Skip camera update if car is not ready or quaternion is invalid
+        // Ensure car object and its visual body are initialized
+        if (!this.car || !this.car.body || !this.car.body.position) {
+            console.warn('Car object or its visual body not ready for camera update.');
+            return; // Skip camera update if car is not ready
         }
 
         const carPosition = this.car.body.position;
-        const carRotation = this.car.body.quaternion; // Use quaternion for rotation
 
         switch (this.cameraMode) {
             case 'chase':
                 // Chase camera follows behind the car
                 const chaseOffset = new THREE.Vector3(0, 3, -8);
-                chaseOffset.applyQuaternion(carRotation);
+                // Apply car's rotation to the offset
+                const carQuaternion = this.car.body.quaternion;
+                chaseOffset.applyQuaternion(carQuaternion);
                 this.camera.position.copy(carPosition).add(chaseOffset);
                 this.camera.lookAt(carPosition);
                 break;
 
-            case 'cockpit':
-                // Cockpit camera is inside the car
-                const cockpitOffset = new THREE.Vector3(0, 1.5, 0.5);
-                cockpitOffset.applyQuaternion(carRotation);
-                this.camera.position.copy(carPosition).add(cockpitOffset);
-                this.camera.quaternion.copy(carRotation);
-                break;
-
             case 'orbit':
                 // Orbit camera rotates around the car
-                if (!this.cameraRotation || typeof this.cameraRotation.x === 'undefined' || typeof this.cameraRotation.y === 'undefined') {
-                    console.warn('cameraRotation properties not ready for orbit mode.', this.cameraRotation);
-                    // Optionally reset to a default valid state or return
-                    this.cameraRotation = new THREE.Vector2(0, 0);
-                    this.cameraDistance = 10; // Ensure distance is also valid
-                }
-
                 const orbitOffset = new THREE.Vector3(
                     Math.cos(this.cameraRotation.x) * Math.cos(this.cameraRotation.y),
                     Math.sin(this.cameraRotation.y),
@@ -1367,22 +415,11 @@ class Game {
                 this.camera.lookAt(carPosition);
                 break;
         }
-
-        // Add camera shake based on car speed and damage
-        if (this.cameraMode !== 'orbit') {
-            const shakeIntensity = Math.min(0.1, this.car.speed * 0.001 + this.car.damage * 0.01);
-            this.camera.position.x += (Math.random() - 0.5) * shakeIntensity;
-            this.camera.position.y += (Math.random() - 0.5) * shakeIntensity;
-            this.camera.position.z += (Math.random() - 0.5) * shakeIntensity;
-        }
     }
 
     changeCamera() {
-        const modes = ['chase', 'cockpit', 'orbit'];
-        const currentIndex = modes.indexOf(this.cameraMode);
-        this.cameraMode = modes[(currentIndex + 1) % modes.length];
-        
-        // Reset camera parameters when changing modes
+        this.cameraMode = (this.cameraMode === 'chase') ? 'orbit' : 'chase';
+        // Reset camera parameters when changing modes if needed
         if (this.cameraMode === 'orbit') {
             this.cameraDistance = 10;
             this.cameraRotation.set(0, 0);
@@ -1401,70 +438,19 @@ class Game {
         const deltaTime = this.clock.getDelta();
 
         // Update physics
-        this.world.step(1/60);
+        this.world.step(1/60, deltaTime);
 
-        // Update road generator
-        if (this.roadGenerator && this.car) {
-            this.roadGenerator.update(this.car.getPosition());
+        // Update car physics and visuals
+        if (this.car) {
+            this.car.update(deltaTime, this.keys);
         }
 
-        // Update car
-        this.car.update(deltaTime, this.keys);
-
-        // Update camera
+        // Update camera position
         this.updateCamera();
-
-        // Update time of day
-        this.updateTimeOfDay(deltaTime);
-
-        // Update weather
-        this.updateWeather(deltaTime);
-
-        // Manually update lighting and view position uniforms for the terrain material
-        if (this.terrain && this.terrain.material && this.terrain.material.uniforms) {
-            const uniforms = this.terrain.material.uniforms;
-            
-            // Update directional light uniform
-            if (this.directionalLight) {
-                uniforms.directionalLights.value.copy(this.directionalLight.position);
-                uniforms.directionalLightColor.value.copy(this.directionalLight.color);
-            }
-
-            // Update ambient light uniform
-            if (this.ambientLight) {
-                 uniforms.ambientLightColor.value.copy(this.ambientLight.color);
-            }
-
-            // Update view position uniform
-            uniforms.viewPosition.value.copy(this.camera.position);
-
-            // Update fog uniforms
-            if (this.scene.fog) {
-                uniforms.fogDensity.value = this.scene.fog.density;
-                uniforms.fogColor.value.copy(this.scene.fog.color);
-            }
-        }
 
         // Render scene
         this.renderer.render(this.scene, this.camera);
     }
-
-    // Placeholder methods for camera change and car reset
-    resetCar() {
-        console.log('Reset car');
-        // Implement car reset logic here
-    }
-
-     setWeather(weatherType) {
-         this.weather = weatherType;
-         console.log('Weather set to:', this.weather);
-         // Implement visual weather changes here
-         if (this.weather === 'clear') {
-             this.atmosphericParticles.visible = false;
-         } else {
-              this.atmosphericParticles.visible = true;
-         }
-     }
 }
 
 export { Game }; 
