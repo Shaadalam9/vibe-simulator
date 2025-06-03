@@ -33,6 +33,7 @@ class Game {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 0.5;
+        this.renderer.setClearColor(0x87CEEB); // Set sky blue background color
         document.body.appendChild(this.renderer.domElement);
         console.log('Renderer setup complete.');
 
@@ -55,23 +56,23 @@ class Game {
             this.wheelMaterial,
             this.terrainMaterial,
             {
-                friction: 1.5, // Increased friction
-                restitution: 0.1 // Low restitution
+                friction: 1.5,
+                restitution: 0.1
             }
         );
         this.world.addContactMaterial(wheelTerrainContact);
 
-        // Create contact material between car body and terrain (for impacts)
-         const bodyTerrainContact = new CANNON.ContactMaterial(
-             this.carBodyMaterial,
-             this.terrainMaterial,
-             {
-                 friction: 0.1, // Low friction for body
-                 restitution: 0.3 // Some bounciness
-             }
-         );
-         this.world.addContactMaterial(bodyTerrainContact);
-         console.log('Physics materials and contacts setup complete.');
+        // Create contact material between car body and terrain
+        const bodyTerrainContact = new CANNON.ContactMaterial(
+            this.carBodyMaterial,
+            this.terrainMaterial,
+            {
+                friction: 0.1,
+                restitution: 0.3
+            }
+        );
+        this.world.addContactMaterial(bodyTerrainContact);
+        console.log('Physics materials and contacts setup complete.');
 
         // Create environment
         this.createSky();
@@ -101,21 +102,10 @@ class Game {
         window.addEventListener('resize', () => this.onWindowResize(), false);
         console.log('Window resize listener added.');
 
-        // Remove loading message - This will now be handled in main.js
-        // console.log('Attempting to hide loading element with ID #loading.');
-        // const loadingElement = document.querySelector('#loading');
-        // if (loadingElement) {
-        //     console.log('Loading element with ID #loading found.', loadingElement);
-        //     loadingElement.style.display = 'none';
-        //     console.log('Loading element display set to none.');
-        // } else {
-        //     console.log('Loading element with ID #loading not found.');
-        // }
-
-         const canvas = this.renderer.domElement;
-         canvas.style.display = 'block'; // Ensure canvas is visible
-         console.log('Canvas display set to block.', canvas);
-         console.log('Game init() called - End');
+        const canvas = this.renderer.domElement;
+        canvas.style.display = 'block';
+        console.log('Canvas display set to block.', canvas);
+        console.log('Game init() called - End');
     }
 
     createSky() {
