@@ -20,6 +20,8 @@ class Game {
         this.weather = 'clear'; // clear, cloudy, rainy, snowy
         this.cameraMode = 'chase'; // chase, cockpit, orbit
         
+        this.roadGenerator = null;
+        
         this.init();
     }
 
@@ -117,21 +119,66 @@ class Game {
     }
 
     createSky() {
-        this.sky = new Sky();
-        this.sky.scale.setScalar(10000);
-        this.scene.add(this.sky);
+        // Remove existing procedural sky
+        if (this.sky) {
+            this.scene.remove(this.sky);
+            this.sky = null;
+        }
 
-        const sun = new THREE.Vector3();
-        const uniforms = this.sky.material.uniforms;
-        uniforms['turbidity'].value = 10;
-        uniforms['rayleigh'].value = 2;
-        uniforms['mieCoefficient'].value = 0.005;
-        uniforms['mieDirectionalG'].value = 0.8;
+        // Create a realistic skybox
+        const skyboxGeometry = new THREE.BoxGeometry(10000, 10000, 10000);
 
-        const phi = THREE.MathUtils.degToRad(90 - 2);
-        const theta = THREE.MathUtils.degToRad(180);
-        sun.setFromSphericalCoords(1, phi, theta);
-        uniforms['sunPosition'].value.copy(sun);
+        // Load cubemap textures (you need to provide these files)
+        const loader = new THREE.CubeTextureLoader();
+        loader.setPath('/textures/skybox/'); // Assuming skybox textures are in public/textures/skybox/
+
+        const textureCube = loader.load([
+            'px.jpg', 'nx.jpg',
+            'py.jpg', 'ny.jpg',
+            'pz.jpg', 'nz.jpg'
+        ], () => {
+             console.log('Skybox textures loaded.');
+        }, undefined, (error) => {
+            console.error('Error loading skybox textures:', error);
+            // Fallback or error handling can go here
+        });
+
+        // Create a shader material for the skybox
+        const skyboxMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                'tCube': { type: 't', value: textureCube }
+            },
+            vertexShader: `
+                varying vec3 vWorldDirection;
+                void main() {
+                    vWorldDirection = transformDirection( position, modelMatrix );
+                    #include <begin_vertex>
+                    #include <project_vertex>
+                }
+            `,
+            fragmentShader: `
+                uniform samplerCube tCube;
+                varying vec3 vWorldDirection;
+
+                void main() {
+                    gl_FragColor = vec4( textureCube( tCube, vec3( -vWorldDirection.x, vWorldDirection.y, vWorldDirection.z ) ).rgb, 1.0 );
+                }
+            `,
+            side: THREE.BackSide,
+            depthWrite: false // Important for skybox
+        });
+
+        this.skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+        this.scene.add(this.skybox);
+
+        console.log('Skybox created.');
+
+        // Adjust scene lighting to match the skybox (basic ambient light adjustment)
+        if (this.ambientLight) {
+            this.ambientLight.color.set(0xc0c0c0); // Adjust ambient light color based on typical sky color
+            this.ambientLight.intensity = 0.5; // Adjust intensity
+        }
+        // Directional light would ideally match the sun direction in the skybox textures
     }
 
     createTerrain(terrainMaterial) {
@@ -195,16 +242,20 @@ class Game {
                 dirtRoughnessMap: { value: dirtRoughnessMap },
                 rockRoughnessMap: { value: rockRoughnessMap },
                 // Define height ranges for blending (these will need tuning)
-                lowHeight: { value: 0 },
-                midHeight: { value: 100 },
-                highHeight: { value: 300 },
+                lowHeight: { value: 20 }, // Adjusted low height
+                midHeight: { value: 80 }, // Adjusted mid height
+                highHeight: { value: 200 }, // Adjusted high height
                 // Add light and material properties uniforms if needed
 
-                // Explicitly add light and camera uniforms for clarity and potential debugging
-                directionalLights: { value: [] },
-                directionalLightColor: { value: [] },
-                ambientLightColor: { value: new THREE.Color(0xffffff) },
-                viewPosition: { value: new THREE.Vector3() },
+                // Uniforms for lighting and camera (manually updated)
+                directionalLights: { value: new THREE.Vector3() }, // Add back and initialize
+                directionalLightColor: { value: new THREE.Color() }, // Add back and initialize
+                ambientLightColor: { value: new THREE.Color(0xffffff) }, // Add back and initialize
+                viewPosition: { value: new THREE.Vector3() }, // Add back and initialize
+
+                // Uniforms for fog (manually updated)
+                fogDensity: { value: 0.0002 }, // Add and initialize with default fog density
+                fogColor: { value: new THREE.Color(0x87CEEB) }, // Add and initialize with default fog color
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -239,13 +290,17 @@ class Game {
                 uniform float midHeight;
                 uniform float highHeight;
 
-                // Uniforms provided by THREE.js when lights: true
-                uniform vec3 directionalLights[ 1 ];
-                uniform vec3 directionalLightColor[ 1 ];
+                // Uniforms for lighting and camera (manually updated)
+                uniform vec3 directionalLights;
+                uniform vec3 directionalLightColor;
                 uniform vec3 ambientLightColor;
 
                 // Camera position (for view direction calculation)
                 uniform vec3 viewPosition;
+
+                // Uniforms for fog
+                uniform float fogDensity;
+                uniform vec3 fogColor;
 
                 varying vec2 vUv;
                 varying float vHeight;
@@ -292,8 +347,8 @@ class Game {
                     // PBR Lighting Calculation (simplified)
                     vec3 N = worldNormal; // World space normal
                     vec3 V = normalize(viewPosition - gl_Position.xyz); // View direction
-                    vec3 L = normalize(directionalLights[0]); // Light direction
-                    vec3 lightColor = directionalLightColor[0];
+                    vec3 L = normalize(directionalLights); // Light direction
+                    vec3 lightColor = directionalLightColor;
 
                     // Ambient term
                     vec3 ambient = ambientLightColor * finalColor.rgb;
@@ -331,7 +386,9 @@ class Game {
                     // Combine ambient, diffuse, and specular
                     vec3 finalLighting = ambient + diffuse + lightColor * specular;
 
-                    gl_FragColor = vec4(finalLighting, finalColor.a);
+                    // Apply fog
+                    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * gl_FragCoord.z * gl_FragCoord.z );
+                    gl_FragColor = vec4(mix(finalLighting, fogColor, fogFactor), finalColor.a);
                 }
 
                 // Define PI for shader
@@ -346,8 +403,8 @@ class Game {
             vertexShader: terrainShader.vertexShader,
             fragmentShader: terrainShader.fragmentShader,
             // Add lights, fog, and shadow support to the shader if needed
-            lights: true, // Enable lighting support in the shader material
-            fog: true,   // Enable fog support
+            // lights: true, // Disable automatic lighting uniform injection
+            fog: false,   // Disable automatic fog uniform injection for this material
             // vertexTangents: true // Required if using tangent attribute in vertex shader
         });
 
@@ -391,7 +448,7 @@ class Game {
 
             // Avoid placing scattered trees too close to the road
             const distanceToRoad = this.getDistanceToRoad(x, z);
-            if (distanceToRoad < 50) continue; // Adjust threshold as needed
+            if (distanceToRoad < 80) continue; // Increased threshold to keep scattered trees further away
 
             // Create tree group
             const tree = new THREE.Group();
@@ -429,7 +486,7 @@ class Game {
 
             // Avoid placing scattered rocks too close to the road
             const distanceToRoad = this.getDistanceToRoad(x, z);
-            if (distanceToRoad < 20) continue; // Adjust threshold as needed
+            if (distanceToRoad < 40) continue; // Increased threshold
 
             const rock = new THREE.Mesh(rockGeometry, rockMaterial);
             rock.position.set(x, y, z);
@@ -449,7 +506,7 @@ class Game {
         }
 
         // Add dense vegetation along the road (bushes)
-        const roadsideVegetationCount = 5000; // More vegetation along the road
+        const roadsideVegetationCount = 10000; // Further increased vegetation density
         const bushGeometry = new THREE.SphereGeometry(1.5, 8, 8); // Simple bush geometry
         const bushMaterial = new THREE.MeshStandardMaterial({ color: 0x4a7c40 }); // Bush color
 
@@ -471,19 +528,19 @@ class Game {
                 const upVector = new THREE.Vector3(0, 1, 0);
                 const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
 
-                // Position the vegetation near the road barrier on one side
-                const sideOffset = Math.random() * 5; // Distance away from the barrier
-                const offsetX = (Math.random() - 0.5) * 2; // Small random offset perpendicular
-                const offsetZ = (Math.random() - 0.5) * 0.5; // Small random offset along road
+                // Position the vegetation near the road barrier on both sides
+                const side = Math.random() > 0.5 ? 1 : -1; // Randomly choose left or right side
+                const offsetX = Math.random() * 4; // Distance away from the barrier (increased)
+                const offsetZ = (Math.random() - 0.5) * 1.5; // Small random offset along road
 
-                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) + 0.5 + sideOffset + offsetX));
+                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + 0.5 + offsetX));
                 position.add(segmentDirection.clone().multiplyScalar(offsetZ));
 
                  const height = this.getTerrainHeightAt(position.x, position.z);
-                 position.y = height + bushGeometry.parameters.radius * 0.3; // Place on terrain with slight offset
+                 position.y = height + bushGeometry.parameters.radius * 0.3 + Math.random() * 0.3; // Place on terrain with slight offset and more randomness
 
                 // Add some randomness to scale and rotation
-                const scale = 0.8 + Math.random() * 0.7; // Varied scale
+                const scale = 0.5 + Math.random() * 1.0; // Varied scale (adjusted range)
                 dummyBush.position.copy(position);
                 dummyBush.scale.set(scale, scale, scale);
                 dummyBush.rotation.set(0, Math.random() * Math.PI * 2, 0);
@@ -499,7 +556,7 @@ class Game {
         }
 
         // Add dense grass along the road edges using instancing
-        const grassBladeCount = 20000; // Large number of grass blades
+        const grassBladeCount = 40000; // Further increased grass density
         // Simple grass blade geometry (can be improved)
         const grassGeometry = new THREE.PlaneGeometry(0.5, 1);
         grassGeometry.translate(0, 0.5, 0); // Pivot at the bottom
@@ -531,32 +588,22 @@ class Game {
 
                 // Position the grass right at the road edge/barrier
                 const side = Math.random() > 0.5 ? 1 : -1; // Randomly choose left or right side
-                const offsetX = Math.random() * 1.0; // Distance away from the road edge
-                const offsetZ = (Math.random() - 0.5) * 0.2; // Small random offset along road
+                const offsetX = Math.random() * 1.2; // Distance away from the road edge (increased)
+                const offsetZ = (Math.random() - 0.5) * 0.3; // Small random offset along road
 
-                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + offsetX));
+                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + Math.random() * 1.0)); // Position right at the edge with increased random offset
                 position.add(segmentDirection.clone().multiplyScalar(offsetZ));
 
                  const height = this.getTerrainHeightAt(position.x, position.z);
                  position.y = height; // Place directly on terrain surface
 
                  // Add some randomness to scale and rotation
-                const scale = 0.5 + Math.random() * 0.5; // Varied scale for grass blades
+                const scale = 0.3 + Math.random() * 0.5; // Varied scale for grass blades (adjusted range)
                 dummyGrass.position.copy(position);
                 dummyGrass.scale.set(scale, scale, scale);
 
-                 // Align grass blade to terrain normal and then add some random y-rotation
-                 // This is a simplified approach, more advanced techniques exist.
-                 const tempNormal = new THREE.Vector3();
-                 this.terrain.geometry.computeVertexNormals(); // Ensure normals are computed
-                 const faceIndex = Math.floor(this.terrain.geometry.index.count * Math.random() / 3) * 3;
-                 const face = new THREE.Face3(this.terrain.geometry.index.array[faceIndex], this.terrain.geometry.index.array[faceIndex + 1], this.terrain.geometry.index.array[faceIndex + 2]);
-                 this.terrain.geometry.computeFaceNormals(); // Ensure face normals are computed
-                 const terrainNormal = face.normal; // This is a face normal, not vertex normal
-                 // A better approach would be to interpolate vertex normals or sample heightfield for slope.
-
-                 // For simplicity, let's just align roughly upright with random rotation around Y
-                 dummyGrass.rotation.set(0, Math.random() * Math.PI * 2, 0);
+                 // Align roughly upright with random rotation around Y and slight tilt
+                 dummyGrass.rotation.set(-Math.PI / 2 + (Math.random() - 0.5) * 0.6, Math.random() * Math.PI * 2, 0); // Tilt slightly and random Y rotation
 
                 dummyGrass.updateMatrix();
                 grassMesh.setMatrixAt(i, dummyGrass.matrix);
@@ -567,6 +614,65 @@ class Game {
              this.scene.add(grassMesh);
         } else {
              console.warn('Road points not available for grass placement.');
+        }
+
+        // Add dense small plants/ground cover along the road edges using instancing
+        const groundCoverCount = 60000; // Very high density for ground cover
+        const groundCoverGeometry = new THREE.PlaneGeometry(0.3, 0.3); // Smaller geometry
+        groundCoverGeometry.translate(0, 0.15, 0); // Pivot at the bottom
+
+        const groundCoverMaterial = new THREE.MeshStandardMaterial({
+            color: 0x7a9a51, // Different shade of green
+            side: THREE.DoubleSide,
+            transparent: true,
+            alphaTest: 0.1
+        });
+
+        const groundCoverMesh = new THREE.InstancedMesh(groundCoverGeometry, groundCoverMaterial, groundCoverCount);
+        const dummyGroundCover = new THREE.Object3D();
+
+         if (this.roadPoints && this.roadPoints.length > 1) {
+             for (let i = 0; i < groundCoverCount; i++) {
+                 // Pick a random point along the road segment
+                const roadPointIndex = Math.floor(Math.random() * (this.roadPoints.length - 1));
+                const p1 = this.roadPoints[roadPointIndex];
+                const p2 = this.roadPoints[roadPointIndex + 1];
+
+                 const t = Math.random(); // Position along the segment
+                 const position = new THREE.Vector3().copy(p1).lerp(p2, t);
+
+                const segmentDirection = new THREE.Vector3().subVectors(p2, p1).normalize();
+                const upVector = new THREE.Vector3(0, 1, 0);
+                const perpendicular = new THREE.Vector3().crossVectors(segmentDirection, upVector).normalize();
+
+                // Position the ground cover very close to the road edge/barrier
+                const side = Math.random() > 0.5 ? 1 : -1; // Randomly choose left or right side
+                const offsetX = Math.random() * 0.5; // Very small distance away from the road edge
+                const offsetZ = (Math.random() - 0.5) * 0.1; // Very small random offset along road
+
+                position.add(perpendicular.clone().multiplyScalar((RoadGenerator.roadWidth / 2) * side + offsetX));
+                position.add(segmentDirection.clone().multiplyScalar(offsetZ));
+
+                 const height = this.getTerrainHeightAt(position.x, position.z);
+                 position.y = height; // Place directly on terrain surface
+
+                 // Add some randomness to scale and rotation
+                const scale = 0.2 + Math.random() * 0.3; // Very small scale
+                dummyGroundCover.position.copy(position);
+                dummyGroundCover.scale.set(scale, scale, scale);
+
+                 // Align roughly upright with random rotation around Y
+                 dummyGroundCover.rotation.set(-Math.PI / 2 + (Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, 0); // Slight tilt and random Y rotation
+
+                dummyGroundCover.updateMatrix();
+                groundCoverMesh.setMatrixAt(i, dummyGroundCover.matrix);
+             }
+             groundCoverMesh.instanceMatrix.needsUpdate = true;
+             groundCoverMesh.castShadow = true;
+             groundCoverMesh.receiveShadow = true;
+             this.scene.add(groundCoverMesh);
+        } else {
+             console.warn('Road points not available for ground cover placement.');
         }
     }
 
@@ -817,16 +923,15 @@ class Game {
     }
 
     createCar(carBodyMaterial, wheelMaterial) {
-        // Get the starting position and direction from the first road point
-        if (!this.roadPoints || this.roadPoints.length < 2) {
-            console.error('Road points not available or insufficient for car placement.');
-            // Fallback to a default position if road points are not ready
-            this.car = new Car(this.scene, this.world, carBodyMaterial, wheelMaterial, new CANNON.Vec3(0, 5, 0));
+        // Get the starting position from the road generator
+        const roadPoints = this.roadGenerator.getRoadPoints();
+        if (!roadPoints || roadPoints.length < 2) {
+            console.error('Road points not available for car placement.');
             return;
         }
 
-        const startPoint = this.roadPoints[0];
-        const nextPoint = this.roadPoints[1];
+        const startPoint = roadPoints[0];
+        const nextPoint = roadPoints[1];
         const initialDirection = new THREE.Vector3().subVectors(nextPoint, startPoint).normalize();
 
         // Calculate initial rotation quaternion based on the direction
@@ -834,10 +939,9 @@ class Game {
         const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), initialDirection);
 
         // Create the car at the starting road point with the calculated rotation
-        // Position the car slightly above the road to prevent initial collision
         const carPosition = new CANNON.Vec3(
             startPoint.x,
-            startPoint.y + 1.0, // Increased height to ensure car is visible
+            startPoint.y + 1.0,
             startPoint.z
         );
 
@@ -1115,40 +1219,51 @@ class Game {
         // Update time of day (24-hour cycle)
         this.timeOfDay = (this.timeOfDay + deltaTime * 0.1) % 24;
         
-        // Calculate sun position
+        // Calculate sun position (still useful for light direction)
         const sunAngle = (this.timeOfDay / 24) * Math.PI * 2;
         const sunHeight = Math.sin(sunAngle);
         const sunDistance = Math.cos(sunAngle);
         
-        // Update sun position
+        // Update sun position for directional light
         const sun = new THREE.Vector3(
             Math.cos(sunAngle) * 1000,
             sunHeight * 1000,
             Math.sin(sunAngle) * 1000
         );
+
+        if (this.directionalLight) {
+            this.directionalLight.position.copy(sun);
+        }
         
-        // Update sky
-        const uniforms = this.sky.material.uniforms;
-        uniforms['sunPosition'].value.copy(sun);
+        // Update skybox uniform if needed (our current skybox shader doesn't need this)
+        // if (this.skybox && this.skybox.material && this.skybox.material.uniforms && this.skybox.material.uniforms.sunPosition) {
+        //     this.skybox.material.uniforms.sunPosition.value.copy(sun);
+        // }
         
         // Update lighting based on time of day
         const dayIntensity = Math.max(0, Math.min(1, (sunHeight + 0.2) / 0.4));
-        this.ambientLight.intensity = 0.4 * dayIntensity;
-        this.directionalLight.intensity = 1.0 * dayIntensity;
+        if (this.ambientLight) {
+             this.ambientLight.intensity = 0.3 * dayIntensity; // Adjusted base intensity to match new ambient light
+        }
+        if (this.directionalLight) {
+             this.directionalLight.intensity = 1.2 * dayIntensity; // Adjusted base intensity to match new directional light
+        }
         
         // Update fog based on time of day
-        if (this.timeOfDay > 19 || this.timeOfDay < 5) {
-            // Night time - darker fog
-            this.scene.fog.density = 0.02;
-        } else if (this.timeOfDay > 6 && this.timeOfDay < 8) {
-            // Dawn - light fog
-            this.scene.fog.density = 0.01;
-        } else if (this.timeOfDay > 17 && this.timeOfDay < 19) {
-            // Dusk - light fog
-            this.scene.fog.density = 0.01;
-        } else {
-            // Day time - clear
-            this.scene.fog.density = 0.005;
+        if (this.scene.fog) {
+             if (this.timeOfDay > 19 || this.timeOfDay < 5) {
+                 // Night time - darker fog
+                 this.scene.fog.density = 0.02;
+             } else if (this.timeOfDay > 6 && this.timeOfDay < 8) {
+                 // Dawn - light fog
+                 this.scene.fog.density = 0.01;
+             } else if (this.timeOfDay > 17 && this.timeOfDay < 19) {
+                 // Dusk - light fog
+                 this.scene.fog.density = 0.01;
+             } else {
+                 // Day time - clear
+                 this.scene.fog.density = 0.0002; // Adjusted to match base fog density
+             }
         }
     }
 
@@ -1330,6 +1445,11 @@ class Game {
         // Update physics
         this.world.step(1/60);
 
+        // Update road generator
+        if (this.roadGenerator && this.car) {
+            this.roadGenerator.update(this.car.getPosition());
+        }
+
         // Update car
         this.car.update(deltaTime, this.keys);
 
@@ -1341,6 +1461,31 @@ class Game {
 
         // Update weather
         this.updateWeather(deltaTime);
+
+        // Manually update lighting and view position uniforms for the terrain material
+        if (this.terrain && this.terrain.material && this.terrain.material.uniforms) {
+            const uniforms = this.terrain.material.uniforms;
+            
+            // Update directional light uniform
+            if (this.directionalLight) {
+                uniforms.directionalLights.value.copy(this.directionalLight.position);
+                uniforms.directionalLightColor.value.copy(this.directionalLight.color);
+            }
+
+            // Update ambient light uniform
+            if (this.ambientLight) {
+                 uniforms.ambientLightColor.value.copy(this.ambientLight.color);
+            }
+
+            // Update view position uniform
+            uniforms.viewPosition.value.copy(this.camera.position);
+
+            // Update fog uniforms
+            if (this.scene.fog) {
+                uniforms.fogDensity.value = this.scene.fog.density;
+                uniforms.fogColor.value.copy(this.scene.fog.color);
+            }
+        }
 
         // Render scene
         this.renderer.render(this.scene, this.camera);

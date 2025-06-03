@@ -12,8 +12,14 @@ export class Car {
         
         // Car properties
         this.maxSteerVal = 0.5;
-        this.maxForce = 1000;
+        this.maxForce = 1500;
         this.brakeForce = 100;
+        this.maxSpeed = 50;
+        this.acceleration = 0.5;
+        this.deceleration = 0.3;
+        this.steeringSpeed = 0.05;
+        this.currentSteering = 0;
+        this.currentSpeed = 0;
         
         // Car state
         this.speed = 0;
@@ -175,19 +181,48 @@ export class Car {
     update(deltaTime, controls) {
         // Update engine sound playback rate and volume based on speed
         if (this.engineSound && this.engineSound.isPlaying) {
-             this.engineSound.setPlaybackRate(0.5 + Math.abs(this.speed) / 30);
-             this.engineSound.setVolume(0.3 + Math.abs(this.speed) / 100);
+            this.engineSound.setPlaybackRate(0.5 + Math.abs(this.speed) / 30);
+            this.engineSound.setVolume(0.3 + Math.abs(this.speed) / 100);
         }
 
-        // Apply engine force to rear wheels (indices 2 and 3)
-        this.engineForce = controls.forward ? this.maxForce : controls.backward ? -this.maxForce : 0;
+        // Calculate target speed based on controls
+        let targetSpeed = 0;
+        if (controls.forward) {
+            targetSpeed = this.maxSpeed;
+        } else if (controls.backward) {
+            targetSpeed = -this.maxSpeed * 0.5; // Reverse is slower
+        }
+
+        // Gradually change current speed
+        if (targetSpeed > this.currentSpeed) {
+            this.currentSpeed = Math.min(targetSpeed, this.currentSpeed + this.acceleration);
+        } else if (targetSpeed < this.currentSpeed) {
+            this.currentSpeed = Math.max(targetSpeed, this.currentSpeed - this.deceleration);
+        }
+
+        // Apply engine force based on current speed
+        this.engineForce = this.currentSpeed * this.maxForce / this.maxSpeed;
         this.vehicle.applyEngineForce(this.engineForce, 2);
         this.vehicle.applyEngineForce(this.engineForce, 3);
 
-        // Apply steering to front wheels (indices 0 and 1)
-        this.steering = controls.left ? -this.maxSteerVal : controls.right ? this.maxSteerVal : 0;
-        this.vehicle.setSteeringValue(this.steering, 0);
-        this.vehicle.setSteeringValue(this.steering, 1);
+        // Calculate target steering
+        let targetSteering = 0;
+        if (controls.left) {
+            targetSteering = -this.maxSteerVal;
+        } else if (controls.right) {
+            targetSteering = this.maxSteerVal;
+        }
+
+        // Gradually change current steering
+        if (targetSteering > this.currentSteering) {
+            this.currentSteering = Math.min(targetSteering, this.currentSteering + this.steeringSpeed);
+        } else if (targetSteering < this.currentSteering) {
+            this.currentSteering = Math.max(targetSteering, this.currentSteering - this.steeringSpeed);
+        }
+
+        // Apply steering to front wheels
+        this.vehicle.setSteeringValue(this.currentSteering, 0);
+        this.vehicle.setSteeringValue(this.currentSteering, 1);
 
         // Apply brake force to all wheels
         this.breakingForce = controls.brake ? this.brakeForce : 0;
@@ -196,9 +231,9 @@ export class Car {
         }
         
         // Handbrake (applies brake to rear wheels)
-        const handbrakeForce = controls.handbrake ? this.brakeForce * 2 : 0; // Increased handbrake force
-         this.vehicle.setBrake(handbrakeForce, 2);
-         this.vehicle.setBrake(handbrakeForce, 3);
+        const handbrakeForce = controls.handbrake ? this.brakeForce * 2 : 0;
+        this.vehicle.setBrake(handbrakeForce, 2);
+        this.vehicle.setBrake(handbrakeForce, 3);
 
         // Update visual position and rotation of car body
         this.body.position.copy(this.physicsBody.position);
@@ -215,21 +250,21 @@ export class Car {
         // Update speed
         this.speed = this.physicsBody.velocity.length();
 
-         // Basic tire screech logic (can be improved with slip calculation)
-         if (controls.handbrake && this.speed > 5) {
-             if (this.tireSound && !this.tireSound.isPlaying) {
-                 this.tireSound.play();
-             }
-         } else {
-              if (this.tireSound && this.tireSound.isPlaying) {
-                  this.tireSound.stop();
-              }
-         }
+        // Basic tire screech logic
+        if ((controls.handbrake || Math.abs(this.currentSteering) > 0.3) && this.speed > 5) {
+            if (this.tireSound && !this.tireSound.isPlaying) {
+                this.tireSound.play();
+            }
+        } else {
+            if (this.tireSound && this.tireSound.isPlaying) {
+                this.tireSound.stop();
+            }
+        }
 
-         // Start engine sound on first acceleration
-         if (this.engineSound && !this.engineSound.isPlaying && (controls.forward || controls.backward)) {
-              this.engineSound.play();
-         }
+        // Start engine sound on first acceleration
+        if (this.engineSound && !this.engineSound.isPlaying && (controls.forward || controls.backward)) {
+            this.engineSound.play();
+        }
     }
 
     getPosition() {
