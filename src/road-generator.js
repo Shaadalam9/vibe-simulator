@@ -1,10 +1,12 @@
 import * as THREE from 'three';
+import * as CANNON from 'cannon-es/dist/cannon-es.js';
 import { createNoise2D } from 'simplex-noise';
 
 export class RoadGenerator {
-    constructor(scene, world) {
+    constructor(scene, world, roadMaterial) {
         this.scene = scene;
         this.world = world;
+        this.roadMaterial = roadMaterial;
         this.noise = createNoise2D();
         this.roadPoints = [];
         this.roadSegments = [];
@@ -93,18 +95,10 @@ export class RoadGenerator {
         roadGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
         roadGeometry.setIndex(indices);
 
-        // Create road material
-        const roadMaterial = new THREE.MeshStandardMaterial({
-            color: 0x333333,
-            roughness: 0.8,
-            metalness: 0.2,
-            side: THREE.DoubleSide
-        });
-
         // Create road mesh
-        const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
-        roadMesh.receiveShadow = true;
-        this.scene.add(roadMesh);
+        this.roadMesh = new THREE.Mesh(roadGeometry, this.roadMaterial);
+        this.roadMesh.receiveShadow = true;
+        this.scene.add(this.roadMesh);
 
         // Create road physics
         this.createRoadPhysics();
@@ -134,6 +128,7 @@ export class RoadGenerator {
             roadBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
 
             this.world.addBody(roadBody);
+            this.roadSegments.push(roadBody);
         }
     }
 
@@ -151,6 +146,14 @@ export class RoadGenerator {
         // Remove old road segments
         const removeCount = Math.floor(this.roadPoints.length * 0.2);
         this.roadPoints.splice(0, removeCount);
+
+        // Remove old physics bodies
+        for (let i = 0; i < removeCount; i++) {
+            if (this.roadSegments[i]) {
+                this.world.removeBody(this.roadSegments[i]);
+            }
+        }
+        this.roadSegments.splice(0, removeCount);
 
         // Generate new road points
         let lastPoint = this.roadPoints[this.roadPoints.length - 1];
