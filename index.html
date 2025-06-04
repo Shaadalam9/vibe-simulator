@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Slowroads Clone</title>
+    <title>3D Driving Game</title>
     <style>
       body {
         margin: 0;
@@ -15,21 +15,46 @@
         height: 100vh;
         display: block;
       }
+      #hud {
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        color: white;
+        font-family: Arial, sans-serif;
+        font-size: 18px;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+      }
+      #weather-controls {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        display: flex;
+        gap: 10px;
+      }
+      button {
+        padding: 8px 16px;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid white;
+        color: white;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      button:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
     </style>
   </head>
   <body>
     <div id="loading">Loading...</div>
 
-    <div class="ui-container">
-      <div class="speed-meter">
-        Speed: <span id="speed">0</span> km/h
-      </div>
-      <div class="damage-meter">
-        Damage: <span id="damage">0</span>%
-        <div class="damage-bar">
-          <div class="damage-fill" id="damage-fill"></div>
-        </div>
-      </div>
+    <div id="hud">
+      <div>Speed: <span id="speed">0</span> km/h</div>
+    </div>
+
+    <div id="weather-controls">
+      <button data-weather="clear">Clear</button>
+      <button data-weather="foggy">Fog</button>
+      <button data-weather="rainy">Rain</button>
     </div>
 
     <div class="controls-info">
@@ -39,14 +64,6 @@
       <p>Space - Handbrake</p>
       <p>C - Change Camera</p>
       <p>R - Reset Car</p>
-    </div>
-
-    <div class="weather-controls">
-      <h3>Weather</h3>
-      <button data-weather="clear">Clear</button>
-      <button data-weather="rainy">Rain</button>
-      <button data-weather="snowy">Snow</button>
-      <button data-weather="foggy">Fog</button>
     </div>
 
     <script type="module" src="/src/game.js"></script>
