@@ -19,6 +19,7 @@ class Game {
         this.roadPoints = [];
         this.currentRoadIndex = 0;
         this.speed = 0;
+        this.weather = 'clear';
 
         this.init();
     }
@@ -165,7 +166,9 @@ class Game {
         const shape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
         this.carBody = new CANNON.Body({
             mass: 1000,
-            shape: shape
+            shape: shape,
+            linearDamping: 0.5,
+            angularDamping: 0.5
         });
         this.world.addBody(this.carBody);
 
@@ -264,6 +267,7 @@ class Game {
     }
 
     setWeather(weather) {
+        this.weather = weather;
         switch (weather) {
             case 'clear':
                 this.scene.fog = new THREE.FogExp2(0x87CEEB, 0.002);

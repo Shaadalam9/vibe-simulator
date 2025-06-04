@@ -31,18 +31,48 @@ export class Car {
     }
 
     createBody() {
-        // Create car body geometry with more detail
+        // Create car group
+        this.car = new THREE.Group();
+
+        // Car body
         const bodyGeometry = new THREE.BoxGeometry(2, 0.5, 4);
-        const bodyMaterial = new THREE.MeshStandardMaterial({
+        const bodyMaterial = new THREE.MeshPhongMaterial({
             color: 0x1a1a1a,
             metalness: 0.8,
             roughness: 0.2
         });
-        
-        this.body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        this.body.castShadow = true;
-        this.body.receiveShadow = true;
-        
+        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+        body.position.y = 0.5;
+        body.castShadow = true;
+        this.car.add(body);
+
+        // Car roof
+        const roofGeometry = new THREE.BoxGeometry(1.5, 0.4, 2);
+        const roofMaterial = new THREE.MeshPhongMaterial({
+            color: 0x2a2a2a,
+            metalness: 0.8,
+            roughness: 0.2
+        });
+        const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+        roof.position.y = 1.2;
+        roof.position.z = -0.5;
+        roof.castShadow = true;
+        this.car.add(roof);
+
+        // Windows
+        const windowGeometry = new THREE.BoxGeometry(1.4, 0.3, 1.8);
+        const windowMaterial = new THREE.MeshPhongMaterial({
+            color: 0x88ccff,
+            transparent: true,
+            opacity: 0.3,
+            metalness: 0.9,
+            roughness: 0.1
+        });
+        const windows = new THREE.Mesh(windowGeometry, windowMaterial);
+        windows.position.y = 0.85;
+        windows.position.z = -0.5;
+        this.car.add(windows);
+
         // Add car details
         this.addCarDetails();
     }
@@ -62,7 +92,7 @@ export class Car {
         const windshield = new THREE.Mesh(windshieldGeometry, glassMaterial);
         windshield.position.set(0, 0.65, -0.5);
         windshield.castShadow = true;
-        this.body.add(windshield);
+        this.car.add(windshield);
         
         // Add headlights
         const headlightGeometry = new THREE.SphereGeometry(0.2, 16, 16);
@@ -74,11 +104,11 @@ export class Car {
         
         const leftHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
         leftHeadlight.position.set(-0.8, 0.3, 2);
-        this.body.add(leftHeadlight);
+        this.car.add(leftHeadlight);
         
         const rightHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
         rightHeadlight.position.set(0.8, 0.3, 2);
-        this.body.add(rightHeadlight);
+        this.car.add(rightHeadlight);
         
         // Add taillights
         const taillightGeometry = new THREE.BoxGeometry(0.3, 0.2, 0.1);
@@ -90,31 +120,32 @@ export class Car {
         
         const leftTaillight = new THREE.Mesh(taillightGeometry, taillightMaterial);
         leftTaillight.position.set(-0.8, 0.3, -2);
-        this.body.add(leftTaillight);
+        this.car.add(leftTaillight);
         
         const rightTaillight = new THREE.Mesh(taillightGeometry, taillightMaterial);
         rightTaillight.position.set(0.8, 0.3, -2);
-        this.body.add(rightTaillight);
+        this.car.add(rightTaillight);
     }
 
     createWheels() {
         const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
-        wheelGeometry.rotateZ(Math.PI / 2);
+        const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
         
-        this.wheels = [];
         const wheelPositions = [
-            [-1, -0.3, 1.5],  // Front left
-            [1, -0.3, 1.5],   // Front right
-            [-1, -0.3, -1.5], // Rear left
-            [1, -0.3, -1.5]   // Rear right
+            [-1, 0.4, 1.2],  // Front left
+            [1, 0.4, 1.2],   // Front right
+            [-1, 0.4, -1.2], // Rear left
+            [1, 0.4, -1.2]   // Rear right
         ];
-        
+
+        this.wheels = [];
         wheelPositions.forEach(position => {
-            const wheel = new THREE.Mesh(wheelGeometry, this.wheelMaterial);
+            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheel.rotation.z = Math.PI / 2;
             wheel.position.set(...position);
             wheel.castShadow = true;
             this.wheels.push(wheel);
-            this.body.add(wheel);
+            this.car.add(wheel);
         });
     }
 
@@ -255,8 +286,8 @@ export class Car {
 
     updateVisuals() {
         // Update car body position and rotation
-        this.body.position.copy(this.physicsBody.position);
-        this.body.quaternion.copy(this.physicsBody.quaternion);
+        this.car.position.copy(this.physicsBody.position);
+        this.car.quaternion.copy(this.physicsBody.quaternion);
         
         // Update wheel rotations
         for (let i = 0; i < this.vehicle.wheelInfos.length; i++) {
