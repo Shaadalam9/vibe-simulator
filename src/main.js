@@ -1,7 +1,7 @@
 console.log('main.js script started');
 import './style.css'
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
+import * as CANNON from 'cannon-es/dist/cannon-es.js';
 import { Car } from './Car.js';
 import { Terrain } from './Terrain.js';
 import { Game } from './game.js';

@@ -79,8 +79,10 @@ export class RoadGenerator {
     }
 
     createRoadMesh() {
+        console.log('Inside createRoadMesh.');
         // Create road geometry
         const geometry = new THREE.BufferGeometry();
+        console.log('BufferGeometry created.', geometry);
         const vertices = [];
         const indices = [];
         const uvs = [];
@@ -111,6 +113,16 @@ export class RoadGenerator {
                 rightEdge2.x, rightEdge2.y, rightEdge2.z
             );
             
+            // Defensive: Check for NaN or Infinity in added vertices
+            const addedVertices = [leftEdge1, rightEdge1, leftEdge2, rightEdge2];
+            for (const v of addedVertices) {
+                if (isNaN(v.x) || isNaN(v.y) || isNaN(v.z) || !isFinite(v.x) || !isFinite(v.y) || !isFinite(v.z)) {
+                    console.error('Invalid vertex coordinate detected in segment', i, ':', v, 'Skipping segment mesh generation.');
+                    // To skip this segment's vertices and indices, you might need to adjust the loop or use a flag
+                    // For now, just logging and continuing to see if other segments are valid
+                }
+            }
+            
             // Add indices for two triangles
             indices.push(
                 baseIndex, baseIndex + 1, baseIndex + 2,
@@ -137,16 +149,25 @@ export class RoadGenerator {
         geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
         geometry.setIndex(indices);
         
+        // Log the final array lengths before creating BufferAttribute
+        console.log('createRoadMesh - vertices array length:', vertices.length);
+        console.log('createRoadMesh - indices array length:', indices.length);
+        console.log('createRoadMesh - uvs array length:', uvs.length);
+        console.log('createRoadMesh - normals array length:', normals.length);
+
         // Create and add road mesh
         this.roadMesh = new THREE.Mesh(geometry, this.material);
         this.roadMesh.receiveShadow = true;
         this.scene.add(this.roadMesh);
+        console.log('Road mesh created and added to scene:', this.roadMesh);
         
         // Create physics body for the road
         this.createRoadPhysics();
+        console.log('createRoadPhysics called.');
     }
 
     createRoadPhysics() {
+        console.log('Starting createRoadPhysics.');
         // Create physics body for the road
         const shape = new CANNON.Box(new CANNON.Vec3(
             RoadGenerator.roadWidth / 2,
@@ -176,7 +197,9 @@ export class RoadGenerator {
             });
             
             this.world.addBody(body);
+            console.log('Added road segment physics body to world:', body);
         }
+        console.log('Finished createRoadPhysics.');
     }
 
     update(carPosition) {
